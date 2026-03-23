@@ -1,0 +1,20 @@
+{
+  "name": "fhol-quincena",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "date-fns": "^4.1.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "pg": "^8.20.0",
+    "pg-hstore": "^2.3.4",
+    "postgres": "^3.4.8",
+    "sequelize": "^6.37.5",
+    "sqlite3": "^5.1.7"
+  }
+}

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>FHOL - Control de Presentismo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 p-4 md:p-8">
+    <div class="max-w-4xl mx-auto space-y-6">
+        <h1 class="text-3xl font-extrabold text-slate-800 border-b-4 border-blue-600 pb-2 text-center">🏗️ FHOL SRL: PANEL DE CONTROL</h1>
+        
+        <div class="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
+            <h2 class="text-lg font-bold mb-4 text-slate-700 underline">1. Registrar Nuevo Personal</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input id="nom" placeholder="Nombre" class="border-2 p-2 rounded-lg focus:border-blue-500 outline-none">
+                <input id="ape" placeholder="Apellido" class="border-2 p-2 rounded-lg focus:border-blue-500 outline-none">
+                <input id="obr" placeholder="Obra (ej: CABA-01)" class="border-2 p-2 rounded-lg focus:border-blue-500 outline-none">
+            </div>
+            <button onclick="alta()" class="mt-4 w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-2 rounded-lg transition shadow-md">
+                + DAR DE ALTA EN EL SISTEMA
+            </button>
+        </div>
+
+        <div class="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-slate-700 underline">2. Carga Diaria de Horas</h2>
+                <button onclick="refresh()" class="text-blue-600 text-sm font-bold hover:underline">🔄 Actualizar Lista</button>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-200 text-slate-700 uppercase text-sm">
+                            <th class="p-3 border">Apellido y Nombre</th>
+                            <th class="p-3 border">Obra</th>
+                            <th class="p-3 border">Fecha</th>
+                            <th class="p-3 border w-24">Horas</th>
+                            <th class="p-3 border text-center">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabla-body">
+                        </tbody>
+                </table>
+                <div id="mensaje-vacio" class="hidden p-4 text-center text-slate-400 italic">No hay empleados registrados aún.</div>
+            </div>
+        </div>
+        <div class="bg-slate-800 p-6 rounded-xl shadow-lg text-white mt-10">
+    <h2 class="text-xl font-bold mb-4 border-b border-slate-600 pb-2">📊 Cierre de Quincena</h2>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+        <div>
+            <label class="block text-xs uppercase mb-1">Mes</label>
+            <select id="rep-mes" class="bg-slate-700 border-none p-2 rounded w-full">
+                <option value="1">Enero</option><option value="2">Febrero</option>
+                <option value="3" selected>Marzo</option><option value="4">Abril</option>
+                <option value="5">Mayo</option><option value="6">Junio</option>
+                <option value="7">Julio</option><option value="8">Agosto</option>
+                <option value="9">Septiembre</option><option value="10">Octubre</option>
+                <option value="11">Noviembre</option><option value="12">Diciembre</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs uppercase mb-1">Quincena</label>
+            <select id="rep-q" class="bg-slate-700 border-none p-2 rounded w-full">
+                <option value="1">1ra (al viernes ~15)</option>
+                <option value="2">2da (fin de mes)</option>
+            </select>
+        </div>
+        <button onclick="generarReporte()" class="bg-yellow-500 hover:bg-yellow-600 text-slate-900 font-bold py-2 rounded">
+            VER TOTALES
+        </button>
+        <button onclick="descargarExcel()" class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 rounded">
+            📥 DESCARGAR EXCEL
+        </button>
+    </div>
+
+    <div id="resultado-reporte" class="mt-6 hidden">
+        <p id="rango-fechas" class="text-yellow-400 font-mono text-sm mb-4"></p>
+        <table class="w-full text-left">
+            <thead>
+                <tr class="text-slate-400 text-xs uppercase border-b border-slate-700">
+                    <th class="pb-2">Personal</th>
+                    <th class="pb-2">Obra</th>
+                    <th class="pb-2 text-right">Total Horas</th>
+                </tr>
+            </thead>
+            <tbody id="tabla-reporte"></tbody>
+        </table>
+    </div>
+</div>
+    </div>
+
+    <script>
+        fetch('/empleados')
+    .then(res => {
+        if (res.status === 401) {
+            window.location.href = '/login.html';
+        }
+        return res.json();
+    })
+    .then(data => {
+        // Acá seguís con tu lógica de dibujar la lista de empleados...
+        console.log("Lista cargada:", data);
+    });
+        // 1. Cargar la lista inicial
+async function refresh() {
+    const res = await fetch('/empleados');
+    const emps = await res.json();
+    const body = document.getElementById('tabla-body');
+    body.innerHTML = '';
+    
+    for (const e of emps) {
+        const hoy = new Date().toISOString().split('T')[0];
+        body.innerHTML += `
+        <tr class="border-b hover:bg-slate-50">
+            <td class="p-3 font-bold">${e.apellido.toUpperCase()}, ${e.nombre}</td>
+            <td class="p-3 text-sm text-slate-500">${e.obra || '-'}</td>
+            <td class="p-3">
+                <input type="date" id="f-${e.id}" value="${hoy}" 
+                    onchange="buscarHoras(${e.id})" 
+                    class="border p-1 rounded w-full">
+            </td>
+            <td class="p-3">
+                <input type="number" id="h-${e.id}" placeholder="0" step="0.5" 
+                    oninput="autoguardar(${e.id})"
+                    class="border-2 p-1 w-full rounded text-center font-bold focus:border-blue-500 outline-none">
+            </td>
+            <td class="p-3 text-center text-xs text-slate-400" id="status-${e.id}">Listo</td>
+        </tr>`;
+        // Al cargar la lista por primera vez, buscamos si ya hay horas para hoy
+        buscarHoras(e.id);
+    }
+}
+
+// 2. Buscar horas guardadas cuando cambia la fecha
+async function buscarHoras(id) {
+    const fecha = document.getElementById(`f-${id}`).value;
+    const inputHs = document.getElementById(`h-${id}`);
+    const status = document.getElementById(`status-${id}`);
+    
+    status.innerText = "Buscando...";
+    const res = await fetch(`/consultar-horas?empleadoId=${id}&fecha=${fecha}`);
+    const data = await res.json();
+    
+    inputHs.value = data.cantidadHoras > 0 ? data.cantidadHoras : "";
+    status.innerText = data.cantidadHoras > 0 ? "Cargado" : "Vacío";
+    inputHs.className = data.cantidadHoras > 0 ? "border-2 p-1 w-full rounded text-center font-bold bg-blue-50 border-blue-200" : "border-2 p-1 w-full rounded text-center font-bold";
+}
+
+// 3. Guardado automático (se activa 1 segundo después de dejar de escribir)
+let timer;
+function autoguardar(id) {
+    clearTimeout(timer);
+    const status = document.getElementById(`status-${id}`);
+    status.innerText = "Escribiendo...";
+    
+    timer = setTimeout(async () => {
+        const fecha = document.getElementById(`f-${id}`).value;
+        const cantidadHoras = document.getElementById(`h-${id}`).value;
+        
+        status.innerText = "Guardando...";
+        
+        await fetch('/cargar-horas', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ empleadoId: id, fecha, cantidadHoras: cantidadHoras || 0 })
+        });
+        
+        status.innerText = "✅ Guardado";
+        setTimeout(() => status.innerText = "Listo", 2000);
+    }, 800); // 800 milisegundos de espera para no saturar
+}
+
+// 4. Alta de empleado
+async function alta() {
+    const nombre = document.getElementById('nom').value;
+    const apellido = document.getElementById('ape').value;
+    const obra = document.getElementById('obr').value;
+    if(!nombre || !apellido) return alert("Faltan datos");
+
+    await fetch('/empleados', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ nombre, apellido, obra })
+    });
+    
+    document.getElementById('nom').value = '';
+    document.getElementById('ape').value = '';
+    document.getElementById('obr').value = '';
+    refresh(); // Actualiza la lista automáticamente
+}
+
+// 5. Generar reporte
+async function generarReporte() {
+    const mes = document.getElementById('rep-mes').value;
+    const q = document.getElementById('rep-q').value;
+    const anio = 2026; // O podés hacerlo dinámico
+
+    const res = await fetch(`/reporte?mes=${mes}&anio=${anio}&q=${q}`);
+    const data = await res.json();
+
+    const div = document.getElementById('resultado-reporte');
+    const tabla = document.getElementById('tabla-reporte');
+    const rango = document.getElementById('rango-fechas');
+
+    div.classList.remove('hidden');
+    rango.innerText = `PERIODO: ${data.rango.desde} hasta ${data.rango.hasta}`;
+    
+    tabla.innerHTML = '';
+    data.datos.forEach(row => {
+        tabla.innerHTML += `
+            <tr class="border-b border-slate-700 italic">
+                <td class="py-2">${row.nombre}</td>
+                <td class="py-2 text-slate-400">${row.obra || '-'}</td>
+                <td class="py-2 text-right font-bold text-yellow-500">${row.totalHoras} hs</td>
+            </tr>
+        `;
+    });
+}
+
+// 6. Exportar Excel
+function descargarExcel() {
+    const mes = document.getElementById('rep-mes').value;
+    const q = document.getElementById('rep-q').value;
+    const anio = 2026; 
+
+    // Redirigimos a la ruta del servidor que genera el archivo
+    window.location.href = `/descargar-excel?mes=${mes}&anio=${anio}&q=${q}`;
+}
+
+window.onload = refresh;
+    </script>
+</body>
+</html>

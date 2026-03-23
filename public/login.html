@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - FHOL Quincena</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f2f5; margin: 0; }
+        .login-card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 300px; }
+        h2 { text-align: center; color: #1e3a8a; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background: #1e3a8a; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #2563eb; }
+        #mensaje { color: red; text-align: center; font-size: 14px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h2>FHOL Quincena</h2>
+        <input type="text" id="username" placeholder="Usuario (admin)" required>
+        <input type="password" id="password" placeholder="Contraseña" required>
+        <button onclick="ingresar()">Ingresar</button>
+        <div id="mensaje"></div>
+    </div>
+
+    <script>
+        async function ingresar() {
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            const msg = document.getElementById('mensaje');
+
+            const res = await fetch('/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user, password: pass })
+            });
+
+            const data = await res.json();
+
+            if (data.success) {
+                window.location.href = '/'; // Si entra bien, nos manda al panel principal
+            } else {
+                msg.innerText = data.message || "Error al ingresar";
+            }
+        }
+    </script>
+</body>
+</html>
