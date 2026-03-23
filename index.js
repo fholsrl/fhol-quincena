@@ -1,7 +1,7 @@
 const express = require('express');
 const session = require('express-session'); // <-- ESTA ES LA LÍNEA QUE FALTA
 const { sequelize, Empleado, Hora, Usuario } = require('./database');
-const { obtenerCorteQuincena } = require('./logicaFechas');
+const { obtenerCorteQuincena } = require('./logicafechas');
 const { Op } = require('sequelize');
 const { addDays, startOfMonth, endOfMonth } = require('date-fns');
 const ExcelJS = require('exceljs');
