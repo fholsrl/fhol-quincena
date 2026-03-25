@@ -22,9 +22,15 @@
         </div>
 
         <div class="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-lg font-bold text-slate-700 underline">2. Carga Diaria de Horas</h2>
-                <button onclick="refresh()" class="text-blue-600 text-sm font-bold hover:underline">🔄 Actualizar Lista</button>
+            <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
+               <h2 class="text-lg font-bold text-slate-700 underline">2. Carga Diaria de Horas</h2>
+               <div class="flex items-center gap-2 bg-blue-50 p-2 rounded-lg border border-blue-200">
+                  <label class="text-xs font-bold text-blue-800 uppercase">Filtrar por Obra:</label>
+                  <select id="filtro-obra" onchange="filtrarPorObra()" class="border-2 p-1 rounded-md text-sm outline-none focus:border-blue-500 bg-white">
+                    <option value="TODAS">-- TODAS --</option>
+                  </select>
+               </div>
+               <button onclick="refresh()" class="text-blue-600 text-sm font-bold hover:underline">🔄 Actualizar Lista</button>
             </div>
             
             <div class="overflow-x-auto">
@@ -87,6 +93,24 @@
             <tbody id="tabla-reporte"></tbody>
         </table>
     </div>
+    <div class="bg-slate-800 p-6 rounded-xl shadow-lg text-white mt-12 border-t-4 border-yellow-500">
+    <h2 class="text-xl font-bold mb-4">⚙️ Configuración de Usuarios</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="space-y-3">
+            <p class="text-sm text-slate-400">Crear nuevo acceso o cambiar clave a uno existente:</p>
+            <input id="user-name" placeholder="Nombre de Usuario" class="w-full p-2 rounded bg-slate-700 border-none text-white">
+            <input id="user-pass" type="password" placeholder="Nueva Contraseña" class="w-full p-2 rounded bg-slate-700 border-none text-white">
+            <button onclick="guardarUsuario()" class="w-full bg-yellow-500 hover:bg-yellow-600 text-slate-900 font-bold py-2 rounded transition">
+                GUARDAR USUARIO / CLAVE
+            </button>
+        </div>
+        <div class="bg-slate-700 p-4 rounded-lg">
+            <p class="text-xs font-bold uppercase mb-3 text-slate-400">Usuarios con permiso:</p>
+            <ul id="lista-usuarios" class="space-y-1 text-sm">
+                </ul>
+        </div>
+    </div>
+</div>
 </div>
     </div>
 
@@ -107,37 +131,85 @@ async function refresh() {
     const res = await fetch('/empleados');
     const emps = await res.json();
     const body = document.getElementById('tabla-body');
-    body.innerHTML = '';
+    const selector = document.getElementById('filtro-obra');
     
+    // Guardar filtro actual para que no se resetee al refrescar
+    const obraPrevia = selector.value;
+    
+    // Extraer nombres de obras únicas para el filtro
+    const obras = [...new Set(emps.map(e => e.obra).filter(o => o))];
+    selector.innerHTML = '<option value="TODAS">-- TODAS --</option>';
+    obras.forEach(o => {
+        selector.innerHTML += `<option value="${o}">${o}</option>`;
+    });
+    selector.value = obraPrevia;
+
+    body.innerHTML = '';
     for (const e of emps) {
-    const hoy = new Date().toISOString().split('T')[0];
-    body.innerHTML += `
-    <tr class="border-b hover:bg-slate-50">
-        <td class="p-3 font-bold">${e.apellido.toUpperCase()}, ${e.nombre}</td>
-        <td class="p-3 text-sm text-slate-500">${e.obra || '-'}</td>
-        <td class="p-3">
-            <input type="date" id="f-${e.id}" value="${hoy}" 
-                onchange="buscarHoras(${e.id})" 
-                class="border p-1 rounded w-full text-sm">
-        </td>
-        <td class="p-3">
-            <input type="number" id="h-${e.id}" placeholder="0" step="0.5" 
-                oninput="autoguardar(${e.id})"
-                class="border-2 p-1 w-full rounded text-center font-bold focus:border-blue-500 outline-none">
-        </td>
-        <td class="p-3 text-center">
-            <div class="flex flex-col items-center gap-1">
-                <span class="text-[10px] text-slate-400 uppercase" id="status-${e.id}">Listo</span>
-                <button onclick="darDeBaja(${e.id}, '${e.nombre} ${e.apellido}')" 
-                        class="bg-red-100 hover:bg-red-500 text-red-600 hover:text-white p-1 rounded transition text-xs">
-                    ELIMINAR 🗑️
-                </button>
-            </div>
-        </td>
-    </tr>`;
-    buscarHoras(e.id);
+        const hoy = new Date().toISOString().split('T')[0];
+        // IMPORTANTE: Agregamos la clase 'fila-empleado' y el atributo 'data-obra'
+        body.innerHTML += `
+        <tr class="border-b hover:bg-slate-50 fila-empleado" data-obra="${e.obra || ''}">
+            <td class="p-3 font-bold">${e.apellido.toUpperCase()}, ${e.nombre}</td>
+            <td class="p-3 text-sm text-slate-500">${e.obra || '-'}</td>
+            <td class="p-3">
+                <input type="date" id="f-${e.id}" value="${hoy}" onchange="buscarHoras(${e.id})" class="border p-1 rounded w-full text-sm">
+            </td>
+            <td class="p-3">
+                <input type="number" id="h-${e.id}" placeholder="0" step="0.5" oninput="autoguardar(${e.id})" class="border-2 p-1 w-full rounded text-center font-bold focus:border-blue-500 outline-none">
+            </td>
+            <td class="p-3 text-center">
+                <div class="flex flex-col items-center gap-1">
+                    <span class="text-[10px] text-slate-400 uppercase" id="status-${e.id}">Listo</span>
+                    <button onclick="darDeBaja(${e.id}, '${e.nombre} ${e.apellido}')" class="text-red-400 hover:text-red-600 text-[10px] font-bold">BAJA 🗑️</button>
+                </div>
+            </td>
+        </tr>`;
+        buscarHoras(e.id);
+    }
+    filtrarPorObra(); 
 }
+
+// 2. PEGAR ESTO AL FINAL DEL SCRIPT
+function filtrarPorObra() {
+    const eleccion = document.getElementById('filtro-obra').value;
+    const filas = document.querySelectorAll('.fila-empleado');
+    filas.forEach(f => {
+        if (eleccion === "TODAS" || f.getAttribute('data-obra') === eleccion) {
+            f.style.display = "";
+        } else {
+            f.style.display = "none";
+        }
+    });
 }
+
+async function guardarUsuario() {
+    const username = document.getElementById('user-name').value;
+    const password = document.getElementById('user-pass').value;
+    if(!username || !password) return alert("Completar datos");
+
+    const res = await fetch('/usuarios/guardar', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    alert(data.message);
+    cargarUsuarios();
+}
+
+async function cargarUsuarios() {
+    const res = await fetch('/usuarios');
+    const users = await res.json();
+    const lista = document.getElementById('lista-usuarios');
+    lista.innerHTML = users.map(u => `<li class="border-b border-slate-600 py-1 text-slate-300">👤 ${u.username}</li>`).join('');
+}
+
+// Actualizamos el inicio para que cargue los usuarios también
+window.onload = () => {
+    refresh();
+    cargarUsuarios();
+};
 
 // 2. Buscar horas guardadas cuando cambia la fecha
 async function buscarHoras(id) {

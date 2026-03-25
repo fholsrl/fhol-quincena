@@ -285,6 +285,37 @@ app.get('/descargar-excel', async (req, res) => {
     }
 });
 
+// 1. Crear o actualizar usuario
+app.post('/usuarios/guardar', proteger, async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        // findOrCreate busca si existe, si no lo crea.
+        const [user, creado] = await Usuario.findOrCreate({
+            where: { username },
+            defaults: { password }
+        });
+
+        if (!creado) {
+            // Si ya existía, actualizamos la contraseña
+            user.password = password;
+            await user.save();
+        }
+        res.json({ success: true, message: creado ? "Usuario creado" : "Contraseña actualizada" });
+    } catch (e) { 
+        res.status(500).json({ success: false, message: e.message }); 
+    }
+});
+
+// 2. Listar usuarios (solo nombres, sin contraseñas)
+app.get('/usuarios', proteger, async (req, res) => {
+    try {
+        const users = await Usuario.findAll({ attributes: ['username'] });
+        res.json(users);
+    } catch (e) { 
+        res.status(500).json({ success: false, message: e.message }); 
+    }
+});
+
 // INICIAR
 const PORT = process.env.PORT || 3000;
 
