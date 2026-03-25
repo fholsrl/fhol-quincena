@@ -48,9 +48,11 @@ app.get('/empleados', proteger, async (req, res) => { // <--- AGREGADO AQUÍ
     res.json(lista);
 });
 
-app.post('/empleados', async (req, res) => {
+app.post('/empleados', proteger, async (req, res) => { // Agregué "proteger" por seguridad
     try {
-        const nuevo = await Empleado.create(req.body);
+        // Forzamos que al crearse esté activo
+        const datos = { ...req.body, activo: true };
+        const nuevo = await Empleado.create(datos);
         res.json(nuevo);
     } catch (e) { res.status(500).send(e.message); }
 });
@@ -82,6 +84,18 @@ app.post('/cargar-horas', proteger, async (req, res) => {
     }
 });
 
+// RUTA PARA DAR DE BAJA (BAJA LÓGICA)
+app.post('/empleados/desactivar', proteger, async (req, res) => {
+    try {
+        const { id } = req.body;
+        // Actualizamos a activo: false
+        await Empleado.update({ activo: false }, { where: { id } });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
 // REPORTE PARA LA QUINCENA
 app.get('/reporte', async (req, res) => {
     try {
@@ -94,11 +108,18 @@ app.get('/reporte', async (req, res) => {
 
         // Buscamos empleados y sus horas en ese rango
         const empleados = await Empleado.findAll({
-            include: [{
-                model: Hora,
-                where: { fecha: { [Op.between]: [desde, hasta] } },
-                required: false
-            }]
+           where: {
+             [Op.or]: [
+              { activo: true }, // Caso A: Sigue trabajando
+              { '$Horas.id$': { [Op.ne]: null } } // Caso B: Ya no trabaja pero tiene horas cargadas
+             ]
+            },
+           include: [{
+           model: Hora,
+             where: { fecha: { [Op.between]: [desde, hasta] } },
+             required: false // Importante: para que no oculte a los activos que aún no cargaron horas
+           }],
+           subQuery: false // Obligatorio cuando usamos filtros en modelos relacionados
         });
 
         // Formateamos la respuesta para que sea fácil de leer en la tabla
@@ -144,11 +165,19 @@ app.get('/descargar-excel', async (req, res) => {
         let hasta = (q === "1") ? corte : endOfMonth(new Date(anioInt, mesInt-1, 1));
 
         const empleados = await Empleado.findAll({
-            include: [{
-                model: Hora,
-                where: { fecha: { [Op.between]: [desde, hasta] } },
-                required: false
-            }]
+          where: {
+             [Op.or]: [
+               { activo: true },
+               { '$Horas.id$': { [Op.ne]: null } }
+             ]  
+            },
+           include: [{
+             model: Hora,
+             where: { fecha: { [Op.between]: [desde, hasta] } },
+              required: false
+          }],
+          subQuery: false, // Evita errores de SQL con el LIMIT/OFFSET interno de Sequelize
+          order: [['apellido', 'ASC']] // De paso, los ordenamos alfabéticamente
         });
 
         const workbook = new ExcelJS.Workbook();
