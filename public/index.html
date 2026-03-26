@@ -213,17 +213,30 @@ window.onload = () => {
 
 // 2. Buscar horas guardadas cuando cambia la fecha
 async function buscarHoras(id) {
-    const fecha = document.getElementById(`f-${id}`).value;
-    const inputHs = document.getElementById(`h-${id}`);
+    const fechaInput = document.getElementById(`f-${id}`);
+    const horaInput = document.getElementById(`h-${id}`);
     const status = document.getElementById(`status-${id}`);
-    
-    status.innerText = "Buscando...";
-    const res = await fetch(`/consultar-horas?empleadoId=${id}&fecha=${fecha}`);
-    const data = await res.json();
-    
-    inputHs.value = data.cantidadHoras > 0 ? data.cantidadHoras : "";
-    status.innerText = data.cantidadHoras > 0 ? "Cargado" : "Vacío";
-    inputHs.className = data.cantidadHoras > 0 ? "border-2 p-1 w-full rounded text-center font-bold bg-blue-50 border-blue-200" : "border-2 p-1 w-full rounded text-center font-bold";
+
+    if (!fechaInput || !status) return; // Seguridad por si el DOM no cargó
+
+    const fecha = fechaInput.value;
+    status.innerText = "BUSCANDO...";
+    status.className = "text-[10px] text-blue-500 animate-pulse uppercase"; // Le damos un toque visual de carga
+
+    try {
+        const res = await fetch(`/consultar-horas?empleadoId=${id}&fecha=${fecha}`);
+        const data = await res.json();
+
+        // Si data.cantidadHoras es > 0 ponemos el valor, si no, vacío (o 0)
+        horaInput.value = data.cantidadHoras > 0 ? data.cantidadHoras : "";
+        
+        status.innerText = "LISTO";
+        status.className = "text-[10px] text-slate-400 uppercase";
+    } catch (e) {
+        console.error("Error al buscar horas:", e);
+        status.innerText = "ERROR";
+        status.className = "text-[10px] text-red-500 uppercase";
+    }
 }
 
 // 3. Guardado automático (se activa 1 segundo después de dejar de escribir)
