@@ -59,28 +59,38 @@ app.post('/empleados', proteger, async (req, res) => { // Agregué "proteger" po
 
 app.post('/cargar-horas', proteger, async (req, res) => {
     try {
-        const { empleadoId, fecha, cantidadHoras } = req.body;
+        let { empleadoId, fecha, cantidadHoras } = req.body;
         
-        // Salvavidas: si por algún motivo no hay sesión, ponemos "admin"
+        // 1. LIMPIEZA DE DECIMALES: Convertimos coma en punto antes de procesar
+        if (typeof cantidadHoras === 'string') {
+            cantidadHoras = cantidadHoras.replace(',', '.');
+        }
+        const valorNumerico = parseFloat(cantidadHoras) || 0;
+
         const usuarioActual = (req.session.user && req.session.user.username) ? req.session.user.username : 'admin';
 
+        // 2. BUSCAR O CREAR
         const [registro, creado] = await Hora.findOrCreate({
             where: { EmpleadoId: empleadoId, fecha: fecha },
             defaults: { 
-                cantidadHoras: parseFloat(cantidadHoras),
+                cantidadHoras: valorNumerico,
                 cargadoPor: usuarioActual 
             }
         });
 
+        // 3. ACTUALIZACIÓN FORZADA: Si ya existía, actualizamos el valor sí o sí
         if (!creado) {
-            registro.cantidadHoras = parseFloat(cantidadHoras);
+            registro.cantidadHoras = valorNumerico;
             registro.cargadoPor = usuarioActual;
             await registro.save();
         }
-        res.json(registro);
+
+        // 4. RESPUESTA CLARA: Devolvemos el registro para que el frontend confirme
+        res.json({ success: true, data: registro });
+
     } catch (e) { 
-        console.error("Error al cargar horas:", e); // Esto te dirá el error real en la terminal
-        res.status(500).send(e.message); 
+        console.error("Error crítico al cargar horas:", e);
+        res.status(500).json({ success: false, message: e.message }); 
     }
 });
 
