@@ -126,6 +126,7 @@
         // Acá seguís con tu lógica de dibujar la lista de empleados...
         console.log("Lista cargada:", data);
     });
+    
         // 1. Cargar la lista inicial
 async function refresh() {
     const res = await fetch('/empleados');
@@ -133,10 +134,7 @@ async function refresh() {
     const body = document.getElementById('tabla-body');
     const selector = document.getElementById('filtro-obra');
     
-    // Guardar filtro actual para que no se resetee al refrescar
     const obraPrevia = selector.value;
-    
-    // Extraer nombres de obras únicas para el filtro
     const obras = [...new Set(emps.map(e => e.obra).filter(o => o))];
     selector.innerHTML = '<option value="TODAS">-- TODAS --</option>';
     obras.forEach(o => {
@@ -145,9 +143,10 @@ async function refresh() {
     selector.value = obraPrevia;
 
     body.innerHTML = '';
+    
+    // 1. Dibujamos TODA la tabla primero
     for (const e of emps) {
         const hoy = new Date().toISOString().split('T')[0];
-        // IMPORTANTE: Agregamos la clase 'fila-empleado' y el atributo 'data-obra'
         body.innerHTML += `
         <tr class="border-b hover:bg-slate-50 fila-empleado" data-obra="${e.obra || ''}">
             <td class="p-3 font-bold">${e.apellido.toUpperCase()}, ${e.nombre}</td>
@@ -160,13 +159,23 @@ async function refresh() {
             </td>
             <td class="p-3 text-center">
                 <div class="flex flex-col items-center gap-1">
-                    <span class="text-[10px] text-slate-400 uppercase" id="status-${e.id}">Listo</span>
+                    <span class="text-[10px] text-slate-400 uppercase" id="status-${e.id}">ESPERANDO...</span>
                     <button onclick="darDeBaja(${e.id}, '${e.nombre} ${e.apellido}')" class="text-red-400 hover:text-red-600 text-[10px] font-bold">BAJA 🗑️</button>
                 </div>
             </td>
         </tr>`;
-        buscarHoras(e.id);
     }
+
+    // 2. UNA VEZ DIBUJADA, disparamos las búsquedas con una pequeña pausa entre cada una
+    // Esto evita que el navegador se trabe (debounce)
+    let delay = 0;
+    for (const e of emps) {
+        setTimeout(() => {
+            buscarHoras(e.id);
+        }, delay);
+        delay += 60; // 60 milisegundos de pausa entre cada empleado
+    }
+
     filtrarPorObra(); 
 }
 
@@ -213,29 +222,26 @@ window.onload = () => {
 
 // 2. Buscar horas guardadas cuando cambia la fecha
 async function buscarHoras(id) {
-    const fechaInput = document.getElementById(`f-${id}`);
-    const horaInput = document.getElementById(`h-${id}`);
-    const status = document.getElementById(`status-${id}`);
+    const fInput = document.getElementById(`f-${id}`);
+    const hInput = document.getElementById(`h-${id}`);
+    const st = document.getElementById(`status-${id}`);
 
-    if (!fechaInput || !status) return; // Seguridad por si el DOM no cargó
+    if (!fInput || !st) return;
 
-    const fecha = fechaInput.value;
-    status.innerText = "BUSCANDO...";
-    status.className = "text-[10px] text-blue-500 animate-pulse uppercase"; // Le damos un toque visual de carga
+    st.innerText = "BUSCANDO...";
+    st.className = "text-[10px] text-blue-500 font-bold animate-pulse";
 
     try {
-        const res = await fetch(`/consultar-horas?empleadoId=${id}&fecha=${fecha}`);
+        const res = await fetch(`/consultar-horas?empleadoId=${id}&fecha=${fInput.value}`);
         const data = await res.json();
 
-        // Si data.cantidadHoras es > 0 ponemos el valor, si no, vacío (o 0)
-        horaInput.value = data.cantidadHoras > 0 ? data.cantidadHoras : "";
+        hInput.value = (data && data.cantidadHoras > 0) ? data.cantidadHoras : "";
         
-        status.innerText = "LISTO";
-        status.className = "text-[10px] text-slate-400 uppercase";
+        st.innerText = "LISTO";
+        st.className = "text-[10px] text-slate-400 uppercase";
     } catch (e) {
-        console.error("Error al buscar horas:", e);
-        status.innerText = "ERROR";
-        status.className = "text-[10px] text-red-500 uppercase";
+        st.innerText = "ERROR";
+        st.className = "text-[10px] text-red-500 font-bold";
     }
 }
 
