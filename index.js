@@ -5,6 +5,7 @@ const { obtenerCorteQuincena } = require('./logicafechas');
 const { Op } = require('sequelize');
 const { addDays, startOfMonth, endOfMonth } = require('date-fns');
 const ExcelJS = require('exceljs');
+const { sequelize: dbLogistica } = require('./database_logistica');
 
 const app = express();
 app.use(express.json());
@@ -325,9 +326,8 @@ app.get('/usuarios', proteger, async (req, res) => {
         res.status(500).json({ success: false, message: e.message }); 
     }
 });
-    app.use('/logistica', require('./rutas_logistica'));
+app.use('/logistica', proteger, require('./rutas_logistica'));
 // INICIAR
-const { sequelize: dbLogistica } = require('./database_logistica'); // Importamos la segunda conexión
 
 const PORT = process.env.PORT || 3000;
 
@@ -337,7 +337,7 @@ async function iniciarServidor() {
         await sequelize.sync({ alter: true });
         console.log("✅ Base de datos Empleados sincronizada");
 
-        // Sincroniza la base de logística (ESTO ES LO QUE FALTA)
+        // AGREGÁ ESTA LÍNEA AQUÍ:
         await dbLogistica.sync({ alter: true });
         console.log("✅ Base de datos Logística sincronizada");
 

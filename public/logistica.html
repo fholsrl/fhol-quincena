@@ -10,20 +10,20 @@
     <div class="max-w-4xl mx-auto space-y-6">
         <div class="flex justify-between items-center border-b-4 border-orange-600 pb-2">
             <h1 class="text-2xl font-black text-slate-800">📦 FHOL LOGÍSTICA</h1>
-            <span id="user-display" class="text-xs font-bold text-slate-500 uppercase"></span>
+            <span id="user-display" class="text-xs font-bold text-slate-500 uppercase">Verificando Sesión...</span>
         </div>
 
         <div id="seccion-alertas" class="hidden bg-red-600 text-white p-4 rounded-xl shadow-lg animate-pulse">
-            <h2 class="font-bold flex items-center gap-2">⚠️ ATENCIÓN: STOCK CRÍTICO (< 30%)</h2>
+            <h2 class="font-bold flex items-center gap-2">⚠️ ATENCIÓN: STOCK CRÍTICO</h2>
             <ul id="lista-alertas" class="text-sm mt-2 list-disc list-inside"></ul>
         </div>
 
         <div class="grid grid-cols-2 gap-4">
-            <button onclick="mostrarModal('ingreso')" class="bg-green-600 text-white p-6 rounded-2xl shadow-md hover:bg-green-700">
+            <button onclick="mostrarModal('ingreso')" class="bg-green-600 text-white p-6 rounded-2xl shadow-md hover:bg-green-700 transition">
                 <span class="text-3xl block">📥</span>
                 <span class="font-bold">INGRESO</span>
             </button>
-            <button onclick="mostrarModal('consumo')" class="bg-blue-600 text-white p-6 rounded-2xl shadow-md hover:bg-blue-700">
+            <button onclick="mostrarModal('consumo')" class="bg-blue-600 text-white p-6 rounded-2xl shadow-md hover:bg-blue-700 transition">
                 <span class="text-3xl block">📤</span>
                 <span class="font-bold">CONSUMO</span>
             </button>
@@ -32,7 +32,7 @@
         <div class="bg-white p-4 rounded-xl shadow-lg border border-slate-200">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="font-bold text-slate-700 underline">ESTADO DE DEPÓSITOS</h2>
-                <button onclick="cargarStock()" class="text-blue-600 text-xs font-bold">🔄 ACTUALIZAR</button>
+                <button onclick="cargarEstado()" class="text-blue-600 text-xs font-bold hover:underline">🔄 ACTUALIZAR</button>
             </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-left text-sm">
@@ -43,44 +43,39 @@
                             <th class="p-2 text-right">CANTIDAD</th>
                         </tr>
                     </thead>
-                    <tbody id="tabla-stock">
-                        </tbody>
+                    <tbody id="tabla-stock"></tbody>
                 </table>
-            </div>
-        </div>
-
-        <div class="bg-slate-800 text-white p-6 rounded-xl shadow-lg">
-            <h2 class="text-lg font-bold mb-4 border-b border-slate-600 pb-2 text-orange-400">📊 RESUMEN DE MOVIMIENTOS</h2>
-            <div id="stats-content" class="space-y-2 text-sm italic text-slate-400">
-                Cargando estadísticas...
             </div>
         </div>
     </div>
 
-    <div id="modal-carga" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4">
-        <div class="bg-white w-full max-w-md p-6 rounded-2xl space-y-4">
-            <h3 id="modal-titulo" class="text-xl font-bold border-b pb-2"></h3>
+    <div id="modal-carga" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-md p-6 rounded-2xl space-y-4 shadow-2xl">
+            <h3 id="modal-titulo" class="text-xl font-bold border-b pb-2 text-slate-800"></h3>
             <div class="space-y-3">
-                <input id="prod-nombre" placeholder="Nombre del Producto" class="w-full border-2 p-2 rounded-lg uppercase">
-                <input id="prod-cant" type="number" placeholder="Cantidad" class="w-full border-2 p-2 rounded-lg">
-                <select id="prod-deposito" class="w-full border-2 p-2 rounded-lg">
+                <label for="prod-nombre" class="sr-only">Nombre del Producto</label>
+                <input id="prod-nombre" placeholder="Nombre del Producto" class="w-full border-2 p-2 rounded-lg uppercase focus:border-orange-500 outline-none">
+                
+                <label for="prod-cant" class="sr-only">Cantidad</label>
+                <input id="prod-cant" type="number" placeholder="Cantidad" class="w-full border-2 p-2 rounded-lg focus:border-orange-500 outline-none">
+                
+                <label for="prod-deposito" class="text-xs font-bold text-slate-400">SELECCIONAR DEPÓSITO:</label>
+                <select id="prod-deposito" class="w-full border-2 p-2 rounded-lg bg-white">
                     <option value="1">Depósito Central</option>
                     <option value="2">Pañol Obra</option>
                 </select>
-                <div id="extra-fields"></div> </div>
+                <div id="extra-fields" class="space-y-3"></div>
+            </div>
             <div class="flex gap-2">
-                <button onclick="cerrarModal()" class="flex-1 bg-slate-200 font-bold py-2 rounded-lg">CANCELAR</button>
-                <button onclick="guardarMovimiento()" class="flex-1 bg-orange-600 text-white font-bold py-2 rounded-lg">GUARDAR</button>
+                <button onclick="cerrarModal()" class="flex-1 bg-slate-200 font-bold py-2 rounded-lg hover:bg-slate-300 transition">CANCELAR</button>
+                <button onclick="guardarMovimiento()" class="flex-1 bg-orange-600 text-white font-bold py-2 rounded-lg hover:bg-orange-700 transition">GUARDAR</button>
             </div>
         </div>
     </div>
 
     <script>
-    // Al cargar la página, traemos el estado actual y el nombre del usuario
     window.onload = () => {
         cargarEstado();
-        // Podés extraer el usuario de la sesión si lo pasas desde el backend o dejarlo estático
-        document.getElementById('user-display').innerText = "Sesión Activa";
     };
 
     let modoActual = 'ingreso';
@@ -92,26 +87,20 @@
         const extraFields = document.getElementById('extra-fields');
         
         modal.classList.remove('hidden');
-        extraFields.innerHTML = ''; // Limpiamos campos extras
+        extraFields.innerHTML = '';
 
         if (tipo === 'ingreso') {
             titulo.innerText = '📥 REGISTRAR INGRESO';
-            // Campos específicos para ingreso: Stock Mínimo y si es Stockeable
             extraFields.innerHTML = `
-                <input id="prod-minimo" type="number" placeholder="Stock Mínimo (para alertas)" class="w-full border-2 p-2 rounded-lg">
-               <div class="flex items-center gap-2 p-2">
-    <input id="prod-stockeable" type="checkbox" checked>
-    <label for="prod-stockeable" class="text-sm text-slate-600">
-        ¿Se guarda en depósito? (Stockeable)
-    </label>
-</div>
-            `;
+                <input id="prod-minimo" type="number" placeholder="Stock Mínimo (Alerta)" class="w-full border-2 p-2 rounded-lg focus:border-orange-500 outline-none">
+                <div class="flex items-center gap-2 p-2 bg-slate-50 rounded-lg">
+                    <input id="prod-stockeable" type="checkbox" checked class="w-5 h-5">
+                    <label for="prod-stockeable" class="text-sm text-slate-600 font-medium">¿Es un producto stockeable?</label>
+                </div>`;
         } else {
             titulo.innerText = '📤 REGISTRAR CONSUMO';
-            // Campos específicos para consumo: Destino de obra
             extraFields.innerHTML = `
-                <input id="prod-obra" placeholder="Obra de Destino" class="w-full border-2 p-2 rounded-lg uppercase">
-            `;
+                <input id="prod-obra" placeholder="Obra de Destino" class="w-full border-2 p-2 rounded-lg uppercase focus:border-orange-500 outline-none">`;
         }
     }
 
@@ -128,6 +117,8 @@
             depositoId: document.getElementById('prod-deposito').value
         };
 
+        if(!data.nombre || !data.cantidad) return alert("Completar nombre y cantidad");
+
         const ruta = modoActual === 'ingreso' ? '/logistica/ingreso' : '/logistica/consumo';
         
         if (modoActual === 'ingreso') {
@@ -143,78 +134,52 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
+            
+            if (res.status === 401) return alert("SESIÓN EXPIRADA: Volvé a loguearte en la página principal.");
+            
             const result = await res.json();
-
             if (result.success) {
-                alert("Movimiento registrado correctamente");
+                alert("✅ Registrado con éxito");
                 cerrarModal();
-                cargarEstado(); // Recargamos la tabla y alertas
+                cargarEstado();
             } else {
-                alert("Error: " + (result.message || "No se pudo realizar la operación"));
+                alert("❌ Error: " + (result.message || "Fallo en base de datos"));
             }
         } catch (e) {
-            alert("Error de conexión con el servidor");
+            alert("📡 Error de conexión con el servidor");
         }
     }
 
     async function cargarEstado() {
         try {
             const res = await fetch('/logistica/estado');
+            if (res.status === 401) {
+                document.getElementById('user-display').innerText = "⚠️ SIN SESIÓN";
+                return;
+            }
             const { inventario, alertas } = await res.json();
+            document.getElementById('user-display').innerText = "✅ Sesión Activa";
 
-            // 1. Llenar tabla de Stock
             const tabla = document.getElementById('tabla-stock');
-            tabla.innerHTML = inventario.map(item => `
-                <tr class="border-b hover:bg-slate-50">
-                    <td class="p-2 font-bold">${item.Producto.nombre}</td>
+            tabla.innerHTML = inventario.length ? inventario.map(item => `
+                <tr class="border-b hover:bg-slate-50 transition">
+                    <td class="p-2 font-bold text-slate-700">${item.Producto.nombre}</td>
                     <td class="p-2 text-center text-slate-500">${item.Deposito.nombre}</td>
-                    <td class="p-2 text-right font-mono">${item.cantidad} ${item.Producto.unidad}</td>
-                </tr>
-            `).join('');
+                    <td class="p-2 text-right font-mono font-bold text-blue-600">${item.cantidad}</td>
+                </tr>`).join('') : '<tr><td colspan="3" class="p-4 text-center text-slate-400">No hay stock registrado</td></tr>';
 
-            // 2. Manejar Alertas del 30%
             const seccionAlertas = document.getElementById('seccion-alertas');
-            const listaAlertas = document.getElementById('lista-alertas');
-            
-            if (alertas.length > 0) {
+            if (alertas && alertas.length > 0) {
                 seccionAlertas.classList.remove('hidden');
-                listaAlertas.innerHTML = alertas.map(a => `
-                    <li><strong>${a.Producto.nombre}</strong> en ${a.Deposito.nombre}: quedan ${a.cantidad} (Mínimo: ${a.Producto.stock_minimo})</li>
-                `).join('');
+                document.getElementById('lista-alertas').innerHTML = alertas.map(a => 
+                    `<li><strong>${a.Producto.nombre}</strong>: Quedan ${a.cantidad} (Mínimo: ${a.Producto.stock_minimo})</li>`).join('');
             } else {
                 seccionAlertas.classList.add('hidden');
             }
         } catch (e) {
-            console.error("Error al cargar estado:", e);
+            console.error("Error de carga:", e);
         }
     }
-    async function cargarEstadisticas() {
-    try {
-        const res = await fetch('/logistica/reporte-obras');
-        const reporte = await res.json();
-        const container = document.getElementById('stats-content');
-        
-        if (Object.keys(reporte).length === 0) {
-            container.innerHTML = "No hay consumos registrados aún.";
-            return;
-        }
-
-        let html = '<div class="space-y-4">';
-        for (const obra in reporte) {
-            html += `<div class="border-l-2 border-orange-500 pl-2">
-                        <p class="font-bold text-slate-200">${obra}</p>`;
-            reporte[obra].forEach(mov => {
-                html += `<p class="text-xs text-slate-400">• ${mov.Producto.nombre}: ${mov.cantidad} (${new Date(mov.fecha).toLocaleDateString()})</p>`;
-            });
-            html += `</div>`;
-        }
-        html += '</div>';
-        container.innerHTML = html;
-    } catch (e) {
-        console.error("Error en estadísticas:", e);
-    }
-}
-// Llamala dentro de window.onload
-</script>
+    </script>
 </body>
 </html>
