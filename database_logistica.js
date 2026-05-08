@@ -1,8 +1,8 @@
 const { Sequelize, DataTypes } = require('sequelize');
 
-// Usá la misma URL de conexión que tenés en tu database.js original
+// REEMPLAZA ESTA URL con la que tenés en tu archivo 'database.js'
 const sequelize = new Sequelize('postgres', 'postgres.qqzmbnpwmmxvjxmixteb', 'FholMarzo2026', {
-dialect: 'postgres',
+    dialect: 'postgres', // ESTO ES LO QUE FALTA
     logging: false,
     dialectOptions: {
         ssl: {
