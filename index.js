@@ -327,12 +327,26 @@ app.get('/usuarios', proteger, async (req, res) => {
 });
     app.use('/logistica', require('./rutas_logistica'));
 // INICIAR
+const { sequelize: dbLogistica } = require('./database_logistica'); // Importamos la segunda conexión
+
 const PORT = process.env.PORT || 3000;
 
-sequelize.sync({ alter: true }).then(() => {
-    app.listen(PORT, () => {
-        console.log(`🚀 FHOL Online en puerto ${PORT}`);
-    });
-}).catch(err => {
-    console.error("Error al sincronizar con Supabase:", err);
-});
+async function iniciarServidor() {
+    try {
+        // Sincroniza la base de empleados
+        await sequelize.sync({ alter: true });
+        console.log("✅ Base de datos Empleados sincronizada");
+
+        // Sincroniza la base de logística (ESTO ES LO QUE FALTA)
+        await dbLogistica.sync({ alter: true });
+        console.log("✅ Base de datos Logística sincronizada");
+
+        app.listen(PORT, () => {
+            console.log(`🚀 FHOL Online en puerto ${PORT}`);
+        });
+    } catch (err) {
+        console.error("❌ Error al iniciar:", err);
+    }
+}
+
+iniciarServidor();
