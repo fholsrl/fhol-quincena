@@ -330,7 +330,6 @@ app.get('/usuarios', proteger, async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 sequelize.sync({ alter: true }).then(() => {
-
     app.listen(PORT, () => {
         console.log(`🚀 FHOL Online en puerto ${PORT}`);
     });
