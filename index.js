@@ -325,15 +325,15 @@ app.get('/usuarios', proteger, async (req, res) => {
         res.status(500).json({ success: false, message: e.message }); 
     }
 });
-
+    app.use('/logistica', require('./rutas_logistica'));
 // INICIAR
 const PORT = process.env.PORT || 3000;
 
 sequelize.sync({ alter: true }).then(() => {
+
     app.listen(PORT, () => {
         console.log(`🚀 FHOL Online en puerto ${PORT}`);
     });
 }).catch(err => {
     console.error("Error al sincronizar con Supabase:", err);
 });
-app.use('/logistica', require('./rutas_logistica'));
