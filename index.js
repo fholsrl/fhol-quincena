@@ -326,7 +326,9 @@ app.get('/usuarios', proteger, async (req, res) => {
         res.status(500).json({ success: false, message: e.message }); 
     }
 });
+
 app.use('/logistica', proteger, require('./rutas_logistica'));
+
 // INICIAR
 
 const PORT = process.env.PORT || 3000;
