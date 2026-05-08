@@ -336,3 +336,4 @@ sequelize.sync({ alter: true }).then(() => {
 }).catch(err => {
     console.error("Error al sincronizar con Supabase:", err);
 });
+app.use('/logistica', require('./rutas_logistica'));
