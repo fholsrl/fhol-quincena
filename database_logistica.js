@@ -1,13 +1,15 @@
 const { Sequelize, DataTypes } = require('sequelize');
 
 // REEMPLAZA ESTA URL con la que tenés en tu archivo 'database.js'
-const sequelize = new Sequelize('postgresql://postgres.qqzmbnpwmmxvjxmixteb:FholMarzo2026@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?supavisor_session_mode=session', {
+const sequelize = new Sequelize('postgres', 'postgres.qqzmbnpwmmxvjxmixteb', 'FholMarzo2026', {
+    host: 'aws-0-us-west-2.pooler.supabase.com',
+    port: 6543,
     dialect: 'postgres',
     logging: false,
     dialectOptions: {
         ssl: {
             require: true,
-            rejectUnauthorized: false
+            rejectUnauthorized: false 
         }
     }
 });
