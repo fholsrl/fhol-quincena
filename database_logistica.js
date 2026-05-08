@@ -1,8 +1,15 @@
 const { Sequelize, DataTypes } = require('sequelize');
 
 // Usá la misma URL de conexión que tenés en tu database.js original
-const sequelize = new Sequelize('TU_URL_DE_CONEXION_A_SUPABASE');
-
+const sequelize = new Sequelize('postgres', 'postgres.qqzmbnpwmmxvjxmixteb', 'FholMarzo2026'; {
+logging: false,
+    dialectOptions: {
+        ssl: {
+            require: true,
+            rejectUnauthorized: false
+        }
+    }
+});
 const Producto = sequelize.define('Producto', {
     nombre: { type: DataTypes.STRING, allowNull: false },
     unidad: { type: DataTypes.STRING, defaultValue: 'unidades' },
