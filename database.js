@@ -2,7 +2,7 @@ const { Sequelize, DataTypes } = require('sequelize');
 
 // CONFIGURACIÓN DESGLOSADA (Más segura y estable)
 const sequelize = new Sequelize('postgres', 'postgres.qqzmbnpwmmxvjxmixteb', 'FholMarzo2026', {
-    host: 'aws-0-us-west-2.pooler.supabase.com',
+    host: 'aws-0-sa-east-1.pooler.supabase.com',
     port: 6543,
     dialect: 'postgres',
     logging: false,
