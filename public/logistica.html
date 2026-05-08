@@ -99,10 +99,12 @@
             // Campos específicos para ingreso: Stock Mínimo y si es Stockeable
             extraFields.innerHTML = `
                 <input id="prod-minimo" type="number" placeholder="Stock Mínimo (para alertas)" class="w-full border-2 p-2 rounded-lg">
-                <div class="flex items-center gap-2 p-2">
-                    <input id="prod-stockeable" type="checkbox" checked>
-                    <label class="text-sm text-slate-600">¿Se guarda en depósito? (Stockeable)</label>
-                </div>
+               <div class="flex items-center gap-2 p-2">
+    <input id="prod-stockeable" type="checkbox" checked>
+    <label for="prod-stockeable" class="text-sm text-slate-600">
+        ¿Se guarda en depósito? (Stockeable)
+    </label>
+</div>
             `;
         } else {
             titulo.innerText = '📤 REGISTRAR CONSUMO';
