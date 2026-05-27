@@ -3,183 +3,557 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FHOL - Gestión de Logística</title>
+    <title>FHOL - Logística</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-100 p-4">
-    <div class="max-w-4xl mx-auto space-y-6">
-        <div class="flex justify-between items-center border-b-4 border-orange-600 pb-2">
-            <h1 class="text-2xl font-black text-slate-800">📦 FHOL LOGÍSTICA</h1>
-            <span id="user-display" class="text-xs font-bold text-slate-500 uppercase">Verificando Sesión...</span>
-        </div>
+<div class="max-w-5xl mx-auto space-y-5">
 
-        <div id="seccion-alertas" class="hidden bg-red-600 text-white p-4 rounded-xl shadow-lg animate-pulse">
-            <h2 class="font-bold flex items-center gap-2">⚠️ ATENCIÓN: STOCK CRÍTICO</h2>
-            <ul id="lista-alertas" class="text-sm mt-2 list-disc list-inside"></ul>
-        </div>
-
-        <div class="grid grid-cols-2 gap-4">
-            <button onclick="mostrarModal('ingreso')" class="bg-green-600 text-white p-6 rounded-2xl shadow-md hover:bg-green-700 transition">
-                <span class="text-3xl block">📥</span>
-                <span class="font-bold">INGRESO</span>
-            </button>
-            <button onclick="mostrarModal('consumo')" class="bg-blue-600 text-white p-6 rounded-2xl shadow-md hover:bg-blue-700 transition">
-                <span class="text-3xl block">📤</span>
-                <span class="font-bold">CONSUMO</span>
-            </button>
-        </div>
-
-        <div class="bg-white p-4 rounded-xl shadow-lg border border-slate-200">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="font-bold text-slate-700 underline">ESTADO DE DEPÓSITOS</h2>
-                <button onclick="cargarEstado()" class="text-blue-600 text-xs font-bold hover:underline">🔄 ACTUALIZAR</button>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm">
-                    <thead>
-                        <tr class="bg-slate-200 text-slate-600">
-                            <th class="p-2">PRODUCTO</th>
-                            <th class="p-2 text-center">DEPÓSITO</th>
-                            <th class="p-2 text-right">CANTIDAD</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tabla-stock"></tbody>
-                </table>
-            </div>
+    <!-- HEADER -->
+    <div class="flex justify-between items-center border-b-4 border-orange-600 pb-2">
+        <h1 class="text-2xl font-black text-slate-800">📦 FHOL LOGÍSTICA</h1>
+        <div class="flex items-center gap-3">
+            <a id="btn-ir-personal" href="/" class="hidden bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition">📋 IR A PERSONAL</a>
+            <button onclick="cerrarSesion()" class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition">🚪 SALIR</button>
+            <span id="user-display" class="text-xs font-bold text-slate-500 uppercase">Verificando...</span>
         </div>
     </div>
 
-    <div id="modal-carga" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-        <div class="bg-white w-full max-w-md p-6 rounded-2xl space-y-4 shadow-2xl">
-            <h3 id="modal-titulo" class="text-xl font-bold border-b pb-2 text-slate-800"></h3>
-            <div class="space-y-3">
-                <label for="prod-nombre" class="sr-only">Nombre del Producto</label>
-                <input id="prod-nombre" placeholder="Nombre del Producto" class="w-full border-2 p-2 rounded-lg uppercase focus:border-orange-500 outline-none">
-                
-                <label for="prod-cant" class="sr-only">Cantidad</label>
-                <input id="prod-cant" type="number" placeholder="Cantidad" class="w-full border-2 p-2 rounded-lg focus:border-orange-500 outline-none">
-                
-                <label for="prod-deposito" class="text-xs font-bold text-slate-400">SELECCIONAR DEPÓSITO:</label>
-                <select id="prod-deposito" class="w-full border-2 p-2 rounded-lg bg-white">
-                    <option value="1">Depósito Central</option>
-                    <option value="2">Pañol Obra</option>
-                </select>
-                <div id="extra-fields" class="space-y-3"></div>
-            </div>
+    <!-- ALERTAS -->
+    <div id="seccion-alertas" class="hidden bg-red-600 text-white p-4 rounded-xl shadow-lg">
+        <h2 class="font-bold">⚠️ STOCK CRÍTICO — por debajo del 30%</h2>
+        <ul id="lista-alertas" class="text-sm mt-2 list-disc list-inside"></ul>
+    </div>
+
+    <!-- ACCIONES -->
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <button onclick="mostrarModal('ingreso')"         class="bg-green-600  text-white p-4 rounded-2xl shadow hover:bg-green-700  transition text-center"><span class="text-2xl block">📥</span><span class="font-bold text-sm">INGRESO</span></button>
+        <button onclick="mostrarModal('movimiento')"      class="bg-blue-600   text-white p-4 rounded-2xl shadow hover:bg-blue-700   transition text-center"><span class="text-2xl block">📤</span><span class="font-bold text-sm">RETIRO / CONSUMO</span></button>
+        <button onclick="mostrarModal('consumo-directo')" class="bg-orange-500 text-white p-4 rounded-2xl shadow hover:bg-orange-600 transition text-center"><span class="text-2xl block">🛒</span><span class="font-bold text-sm">COMPRA DIRECTA</span></button>
+    </div>
+
+    <!-- TABS -->
+    <div class="flex flex-wrap gap-1 border-b border-slate-300">
+        <button onclick="tab('stock')"   id="tab-stock"   class="tab active-tab">📦 STOCK</button>
+        <button onclick="tab('obra')"    id="tab-obra"    class="tab">🏗️ POR OBRA</button>
+        <button onclick="tab('reporte')" id="tab-reporte" class="tab">📊 REPORTE GLOBAL</button>
+    </div>
+
+    <!-- PANEL: STOCK (incluye gestión de productos) -->
+    <div id="panel-stock" class="bg-white p-4 rounded-xl shadow border border-slate-200">
+        <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
+            <h2 class="font-bold text-slate-700">STOCK POR UBICACIÓN</h2>
             <div class="flex gap-2">
-                <button onclick="cerrarModal()" class="flex-1 bg-slate-200 font-bold py-2 rounded-lg hover:bg-slate-300 transition">CANCELAR</button>
-                <button onclick="guardarMovimiento()" class="flex-1 bg-orange-600 text-white font-bold py-2 rounded-lg hover:bg-orange-700 transition">GUARDAR</button>
+                <button onclick="descargarExcelGeneral()" class="bg-emerald-600 text-white text-xs font-bold px-3 py-1 rounded-lg hover:bg-emerald-700">⬇ Excel General</button>
+                <button onclick="cargarEstado()" class="text-blue-600 text-xs font-bold hover:underline">🔄 Actualizar</button>
             </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="bg-slate-200 text-slate-600 text-left">
+                    <th class="p-2">PRODUCTO</th>
+                    <th class="p-2 text-center">TIPO</th>
+                    <th class="p-2 text-center">UBICACIÓN</th>
+                    <th class="p-2 text-right">CANTIDAD</th>
+                    <th class="p-2 text-center">ESTADO</th>
+                    <th class="p-2 text-center">BAJA</th>
+                </tr></thead>
+                <tbody id="tabla-stock"></tbody>
+            </table>
         </div>
     </div>
 
-    <script>
-    window.onload = () => {
-        cargarEstado();
+    <!-- PANEL: POR OBRA -->
+    <div id="panel-obra" class="hidden bg-white p-4 rounded-xl shadow border border-slate-200">
+        <div class="flex flex-wrap gap-3 items-center mb-4">
+            <select id="select-obra-vista" onchange="cargarVistaObra()" class="border-2 p-2 rounded-lg bg-white flex-1 focus:border-orange-500 outline-none">
+                <option value="">-- Seleccionar obra --</option>
+            </select>
+            <button id="btn-excel-obra" onclick="descargarExcelObra()" class="hidden bg-emerald-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-emerald-700">⬇ Excel esta obra</button>
+        </div>
+        <div id="contenido-obra"></div>
+    </div>
+
+    <!-- PANEL: REPORTE GLOBAL -->
+    <div id="panel-reporte" class="hidden bg-white p-4 rounded-xl shadow border border-slate-200">
+        <div class="flex justify-between items-center mb-3">
+            <h2 class="font-bold text-slate-700">MOVIMIENTOS POR OBRA</h2>
+            <button onclick="cargarReporteGlobal()" class="text-blue-600 text-xs font-bold hover:underline">🔄 Actualizar</button>
+        </div>
+        <div id="contenido-reporte"></div>
+    </div>
+
+</div>
+
+<!-- MODAL -->
+<div id="modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white w-full max-w-md p-6 rounded-2xl space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <h3 id="modal-titulo" class="text-xl font-bold border-b pb-2 text-slate-800"></h3>
+        <div id="modal-campos" class="space-y-3"></div>
+        <div class="flex gap-2 pt-2">
+            <button onclick="cerrarModal()" class="flex-1 bg-slate-200 font-bold py-2 rounded-lg hover:bg-slate-300">CANCELAR</button>
+            <button id="btn-guardar" onclick="guardar()" class="flex-1 bg-orange-600 text-white font-bold py-2 rounded-lg hover:bg-orange-700">GUARDAR</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .tab { padding: 8px 14px; font-size: 13px; font-weight: 700; color: #64748b; border-radius: 6px 6px 0 0; transition: all .15s; }
+    .tab:hover { color: #ea580c; }
+    .active-tab { color: #ea580c; border-bottom: 3px solid #ea580c; }
+</style>
+
+<script>
+async function cerrarSesion() {
+    await fetch('/logout', { method: 'POST' });
+    window.location.href = '/login.html';
+}
+
+// ─── ESTADO ───────────────────────────────────────────────────────────────────
+let modoActual   = '';
+let productos    = [];
+let ubicaciones  = [];
+let obraSeleccionadaId = null;
+
+window.onload = async () => {
+    // Verificar sesión y acceso a LOGISTICA
+    const meRes = await fetch('/me');
+    if (meRes.status === 401) { window.location.href = '/login.html'; return; }
+    const me = await meRes.json();
+    if (!me.logueado || !(me.modulos || '').includes('LOGISTICA')) {
+        window.location.href = '/login.html'; return;
+    }
+    document.getElementById('user-display').innerText = `✅ ${me.username}${me.rol === 'admin' ? ' (Admin)' : ''}`;
+    if ((me.modulos || '').includes('PERSONAL')) {
+        document.getElementById('btn-ir-personal').classList.remove('hidden');
+    }
+    await recargarBase();
+    await cargarEstado();
+};
+
+async function recargarBase() {
+    await Promise.all([fetchProductos(), fetchUbicaciones()]);
+    poblarSelectObras();
+}
+async function fetchProductos() {
+    const r = await fetch('/logistica/productos');
+    if (r.ok) productos = await r.json();
+}
+async function fetchUbicaciones() {
+    const r = await fetch('/logistica/ubicaciones');
+    if (r.ok) ubicaciones = await r.json();
+}
+function poblarSelectObras() {
+    const obras = ubicaciones.filter(u => u.tipo_ubicacion === 'OBRA');
+    const sel   = document.getElementById('select-obra-vista');
+    sel.innerHTML = '<option value="">-- Seleccionar obra --</option>' +
+        obras.map(u => `<option value="${u.id}">${u.nombre}</option>`).join('');
+}
+
+// ─── TABS ─────────────────────────────────────────────────────────────────────
+function tab(nombre) {
+    ['stock','obra','reporte'].forEach(t => {
+        document.getElementById(`panel-${t}`).classList.add('hidden');
+        document.getElementById(`tab-${t}`).classList.remove('active-tab');
+    });
+    document.getElementById(`panel-${nombre}`).classList.remove('hidden');
+    document.getElementById(`tab-${nombre}`).classList.add('active-tab');
+    if (nombre === 'reporte') cargarReporteGlobal();
+}
+
+// ─── HELPERS DE SELECTS ───────────────────────────────────────────────────────
+function selUbicacion(id, label, lista) {
+    return `<div><label class="text-xs font-bold text-slate-400">${label}</label>
+    <select id="${id}" class="w-full border-2 p-2 rounded-lg bg-white mt-1 focus:border-orange-500 outline-none">
+        <option value="">-- Seleccionar --</option>
+        ${lista.map(u => `<option value="${u.id}">[${u.tipo_ubicacion}] ${u.nombre}</option>`).join('')}
+    </select></div>`;
+}
+function inputCant() {
+    return `<div><label class="text-xs font-bold text-slate-400">CANTIDAD:</label>
+    <input id="cant" type="number" min="0.01" step="0.01" placeholder="Cantidad"
+        class="w-full border-2 p-2 rounded-lg mt-1 focus:border-orange-500 outline-none"></div>`;
+}
+
+// ─── MODAL ───────────────────────────────────────────────────────────────────
+async function mostrarModal(modo) {
+    await recargarBase();
+    modoActual = modo;
+    document.getElementById('modal').classList.remove('hidden');
+    const campos = document.getElementById('modal-campos');
+
+    const titulos = {
+        ingreso:           '📥 REGISTRAR INGRESO',
+        movimiento:        '📤 RETIRO / CONSUMO',
+        'consumo-directo': '🛒 COMPRA DIRECTA'
     };
+    document.getElementById('modal-titulo').innerText = titulos[modo];
 
-    let modoActual = 'ingreso';
+    if (modo === 'ingreso') {
+        campos.innerHTML = `
+            <div><label class="text-xs font-bold text-slate-400">NOMBRE DEL PRODUCTO:</label>
+            <input id="nombre" placeholder="Nombre" class="w-full border-2 p-2 rounded-lg uppercase mt-1 focus:border-orange-500 outline-none"></div>
+            ${inputCant()}
+            <div><label class="text-xs font-bold text-slate-400">TIPO DE PRODUCTO:</label>
+            <select id="tipo" class="w-full border-2 p-2 rounded-lg bg-white mt-1 focus:border-orange-500 outline-none">
+                <option value="CONSUMIBLE">🪣 Consumible (pintura, cemento, etc.)</option>
+                <option value="RETORNABLE">🔧 Retornable / Herramienta</option>
+                <option value="NO_STOCKEABLE">📝 Sin stock (solo registro)</option>
+            </select></div>
+            ${selUbicacion('ubic-destino', 'DEPÓSITO DE INGRESO:', ubicaciones)}
+            <div><label class="text-xs font-bold text-slate-400">STOCK MÍNIMO (para alertas):</label>
+            <input id="minimo" type="number" placeholder="0" class="w-full border-2 p-2 rounded-lg mt-1 focus:border-orange-500 outline-none"></div>`;
 
-    function mostrarModal(tipo) {
-        modoActual = tipo;
-        const modal = document.getElementById('modal-carga');
-        const titulo = document.getElementById('modal-titulo');
-        const extraFields = document.getElementById('extra-fields');
-        
-        modal.classList.remove('hidden');
-        extraFields.innerHTML = '';
+    } else if (modo === 'movimiento') {
+        // Paso 1: elegir origen → carga productos disponibles
+        campos.innerHTML = `
+            <p class="text-xs text-slate-500 bg-slate-50 p-2 rounded-lg">Primero elegí la ubicación de origen. Luego seleccioná el producto disponible y si es un traslado o un consumo.</p>
+            ${selUbicacion('ubic-origen', 'SALE DESDE:', ubicaciones)}
+            <div id="paso2" class="hidden space-y-3">
+                <div><label class="text-xs font-bold text-slate-400">PRODUCTO DISPONIBLE:</label>
+                <select id="prod-id" class="w-full border-2 p-2 rounded-lg bg-white mt-1 focus:border-orange-500 outline-none">
+                    <option value="">-- Seleccionar --</option>
+                </select></div>
+                ${inputCant()}
+                <div><label class="text-xs font-bold text-slate-400">TIPO DE MOVIMIENTO:</label>
+                <select id="tipo-mov" class="w-full border-2 p-2 rounded-lg bg-white mt-1 focus:border-orange-500 outline-none" onchange="toggleDestino()">
+                    <option value="traslado">🔄 Traslado / Devolución (el stock se mueve a otra ubicación)</option>
+                    <option value="consumo">🪣 Consumo (sale del stock definitivamente)</option>
+                </select></div>
+                <div id="bloque-destino">
+                    ${selUbicacion('ubic-destino', 'VA HACIA:', ubicaciones)}
+                </div>
+                <div id="bloque-obra-consumo" class="hidden">
+                    ${selUbicacion('ubic-obra-consumo', 'OBRA QUE CONSUME:', ubicaciones.filter(u => u.tipo_ubicacion === 'OBRA'))}
+                </div>
+            </div>`;
 
-        if (tipo === 'ingreso') {
-            titulo.innerText = '📥 REGISTRAR INGRESO';
-            extraFields.innerHTML = `
-                <input id="prod-minimo" type="number" placeholder="Stock Mínimo (Alerta)" class="w-full border-2 p-2 rounded-lg focus:border-orange-500 outline-none">
-                <div class="flex items-center gap-2 p-2 bg-slate-50 rounded-lg">
-                    <input id="prod-stockeable" type="checkbox" checked class="w-5 h-5">
-                    <label for="prod-stockeable" class="text-sm text-slate-600 font-medium">¿Es un producto stockeable?</label>
-                </div>`;
+        // Al cambiar origen, carga productos disponibles y actualiza visibilidad de campos
+        setTimeout(() => {
+            const selOrigen = document.getElementById('ubic-origen');
+            if (selOrigen) {
+                selOrigen.addEventListener('change', async () => {
+                    await cargarProductosEnOrigen();
+                    toggleDestino();
+                });
+            }
+        }, 50);
+
+    } else if (modo === 'consumo-directo') {
+        const obras = ubicaciones.filter(u => u.tipo_ubicacion === 'OBRA');
+        campos.innerHTML = `
+            <div><label class="text-xs font-bold text-slate-400">PRODUCTO (nombre):</label>
+            <input id="nombre" placeholder="Nombre del producto" class="w-full border-2 p-2 rounded-lg uppercase mt-1 focus:border-orange-500 outline-none"></div>
+            ${inputCant()}
+            ${selUbicacion('ubic-destino', 'OBRA DESTINO:', obras)}`;
+    }
+}
+
+async function cargarProductosEnOrigen() {
+    const origenId = document.getElementById('ubic-origen').value;
+    if (!origenId) return;
+
+    const res   = await fetch(`/logistica/stock-en/${origenId}`);
+    const items = await res.json();
+
+    const paso2 = document.getElementById('paso2');
+    const sel   = document.getElementById('prod-id');
+
+    if (!items.length) {
+        paso2.classList.add('hidden');
+        alert('No hay stock en esa ubicación.');
+        return;
+    }
+
+    sel.innerHTML = '<option value="">-- Seleccionar --</option>' +
+        items.map(i => `<option value="${i.productoId}">[${i.Producto.tipo}] ${i.Producto.nombre} — disponible: ${i.cantidad} ${i.Producto.unidad}</option>`).join('');
+
+    paso2.classList.remove('hidden');
+    toggleDestino();
+}
+
+function toggleDestino() {
+    const tipoMov = document.getElementById('tipo-mov')?.value;
+    const bloqDest  = document.getElementById('bloque-destino');
+    const bloqObra  = document.getElementById('bloque-obra-consumo');
+    if (!bloqDest || !bloqObra) return;
+
+    if (tipoMov === 'traslado') {
+        bloqDest.classList.remove('hidden');
+        bloqObra.classList.add('hidden');
+    } else {
+        // Consumo: si el origen ya es una OBRA, no hace falta pedir obra destino
+        const origenId = document.getElementById('ubic-origen')?.value;
+        const origenUbic = ubicaciones.find(u => u.id == origenId);
+        const origenEsObra = origenUbic && origenUbic.tipo_ubicacion === 'OBRA';
+
+        bloqDest.classList.add('hidden');
+        if (origenEsObra) {
+            bloqObra.classList.add('hidden'); // origen ya es la obra
         } else {
-            titulo.innerText = '📤 REGISTRAR CONSUMO';
-            extraFields.innerHTML = `
-                <input id="prod-obra" placeholder="Obra de Destino" class="w-full border-2 p-2 rounded-lg uppercase focus:border-orange-500 outline-none">`;
+            bloqObra.classList.remove('hidden');
+            // Poblar obras si no está poblado
+            const selObra = document.getElementById('ubic-obra-consumo');
+            if (selObra && selObra.options.length <= 1) {
+                const obras = ubicaciones.filter(u => u.tipo_ubicacion === 'OBRA');
+                selObra.innerHTML = '<option value="">-- Seleccionar obra --</option>' +
+                    obras.map(u => `<option value="${u.id}">${u.nombre}</option>`).join('');
+            }
         }
     }
+}
 
-    function cerrarModal() {
-        document.getElementById('modal-carga').classList.add('hidden');
-        document.getElementById('prod-nombre').value = '';
-        document.getElementById('prod-cant').value = '';
-    }
+function cerrarModal() {
+    document.getElementById('modal').classList.add('hidden');
+}
 
-    async function guardarMovimiento() {
-        const data = {
-            nombre: document.getElementById('prod-nombre').value,
-            cantidad: document.getElementById('prod-cant').value,
-            depositoId: document.getElementById('prod-deposito').value
+async function guardar() {
+    const cant = parseFloat(document.getElementById('cant')?.value);
+    if (!cant || cant <= 0) return alert('Completar la cantidad');
+    let ruta, body = { cantidad: cant };
+
+    try {
+        if (modoActual === 'ingreso') {
+            const nombre = document.getElementById('nombre').value.trim();
+            const ubicId = document.getElementById('ubic-destino').value;
+            const tipo   = document.getElementById('tipo').value;
+            if (!nombre) return alert('Completar el nombre del producto');
+            if (!ubicId) return alert('Seleccionar un depósito de ingreso');
+            body = { ...body, nombre, ubicacionId: ubicId, tipo, stock_minimo: document.getElementById('minimo').value || 0 };
+            ruta = '/logistica/ingreso';
+
+        } else if (modoActual === 'movimiento') {
+            const prodId  = document.getElementById('prod-id').value;
+            const origen  = document.getElementById('ubic-origen').value;
+            const tipoMov = document.getElementById('tipo-mov').value;
+            if (!prodId)  return alert('Seleccionar un producto');
+            if (!origen)  return alert('Seleccionar ubicación de origen');
+
+            if (tipoMov === 'traslado') {
+                const destino = document.getElementById('ubic-destino').value;
+                if (!destino) return alert('Seleccionar ubicación de destino');
+                if (origen === destino) return alert('Origen y destino no pueden ser iguales');
+                body = { ...body, productoId: prodId, ubicacionOrigenId: origen, ubicacionDestinoId: destino };
+                ruta = '/logistica/traslado';
+            } else {
+                // Si el origen ya es una obra, la propia obra es la que consume
+                const origenUbic = ubicaciones.find(u => u.id == origen);
+                const origenEsObra = origenUbic && origenUbic.tipo_ubicacion === 'OBRA';
+                let obraId;
+                if (origenEsObra) {
+                    obraId = origen;
+                } else {
+                    obraId = document.getElementById('ubic-obra-consumo').value;
+                    if (!obraId) return alert('Seleccionar la obra que consume');
+                }
+                body = { ...body, productoId: prodId, ubicacionOrigenId: origen, ubicacionDestinoId: obraId };
+                ruta = '/logistica/consumo';
+            }
+
+        } else if (modoActual === 'consumo-directo') {
+            const nombre  = document.getElementById('nombre').value.trim();
+            const destino = document.getElementById('ubic-destino').value;
+            if (!nombre)  return alert('Completar el nombre del producto');
+            if (!destino) return alert('Seleccionar la obra de destino');
+            body = { ...body, nombre, ubicacionDestinoId: destino };
+            ruta = '/logistica/consumo-directo';
+        }
+
+        const res = await fetch(ruta, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (res.status === 401) { window.location.href = '/login_logistica.html'; return; }
+        const result = await res.json();
+
+        if (result.success) {
+            alert('✅ Registrado con éxito');
+            cerrarModal();
+            await recargarBase();
+            await cargarEstado();
+        } else {
+            alert('❌ ' + (result.message || result.error || 'Error en base de datos'));
+        }
+    } catch (e) { alert('📡 Error: ' + e.message); }
+}
+
+// ─── PANELES ─────────────────────────────────────────────────────────────────
+
+async function cargarEstado() {
+    try {
+        const res = await fetch('/logistica/estado');
+        if (res.status === 401) { window.location.href = '/login_logistica.html'; return; }
+        const { inventario, alertas } = await res.json();
+
+        const iconTipo = { CONSUMIBLE:'🪣', RETORNABLE:'🔧', NO_STOCKEABLE:'📝' };
+        const tabla = document.getElementById('tabla-stock');
+        tabla.innerHTML = inventario.length ? inventario.map(item => {
+            const actual  = parseFloat(item.cantidad);
+            const inicial = parseFloat(item.stock_inicial) || 0;
+            const esRet   = item.Producto.tipo === 'RETORNABLE';
+            const pct     = (!esRet && inicial > 0) ? Math.round((actual / inicial) * 100) : null;
+            const color   = esRet ? 'bg-purple-100 text-purple-700'
+                          : pct === null ? 'bg-slate-100 text-slate-500'
+                          : pct <= 30 ? 'bg-red-100 text-red-700 font-bold'
+                          : pct <= 60 ? 'bg-yellow-100 text-yellow-700'
+                          : 'bg-green-100 text-green-700';
+            const estado  = esRet ? 'Retornable' : pct === null ? 'Trasladado' : `${pct}%`;
+            return `<tr class="border-b hover:bg-slate-50">
+                <td class="p-2 font-bold text-slate-700">${item.Producto.nombre}</td>
+                <td class="p-2 text-center text-xs">${iconTipo[item.Producto.tipo] || ''} ${item.Producto.tipo}</td>
+                <td class="p-2 text-center text-xs text-slate-500">${item.Ubicacion.nombre}<br><span class="text-slate-400">${item.Ubicacion.tipo_ubicacion}</span></td>
+                <td class="p-2 text-right font-mono font-bold text-blue-600">${actual} ${item.Producto.unidad}</td>
+                <td class="p-2 text-center"><span class="px-2 py-1 rounded-full text-xs ${color}">${estado}</span></td>
+                <td class="p-2 text-center">
+                    <button onclick="darBaja(${item.Producto.id},'${item.Producto.nombre.replace(/'/g,"\\'")}')""
+                        class="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded-lg hover:bg-red-200">BAJA</button>
+                </td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="6" class="p-4 text-center text-slate-400">Sin stock registrado</td></tr>';
+
+        const sec = document.getElementById('seccion-alertas');
+        if (alertas.length) {
+            sec.classList.remove('hidden');
+            document.getElementById('lista-alertas').innerHTML = alertas.map(a =>
+                `<li><strong>${a.Producto.nombre}</strong> en ${a.Ubicacion.nombre}: ${a.cantidad} ${a.Producto.unidad}</li>`).join('');
+        } else { sec.classList.add('hidden'); }
+    } catch (e) { console.error(e); }
+}
+
+async function cargarVistaObra() {
+    const ubicId = document.getElementById('select-obra-vista').value;
+    if (!ubicId) return alert('Seleccionar una obra');
+    obraSeleccionadaId = ubicId;
+    document.getElementById('btn-excel-obra').classList.remove('hidden');
+
+    const contenido = document.getElementById('contenido-obra');
+    contenido.innerHTML = '<p class="text-slate-400 text-sm p-4">Cargando...</p>';
+
+    try {
+        const res = await fetch(`/logistica/vista-obra/${ubicId}`);
+        const { stockObra, movimientos } = await res.json();
+
+        const iconTipo = { CONSUMIBLE:'🪣', RETORNABLE:'🔧', NO_STOCKEABLE:'📝' };
+        const iconMov  = { CONSUMO:'🪣 CONSUMO', CONSUMO_DIRECTO:'🛒 COMPRA DIRECTA', TRASLADO:'🔄 TRASLADO', INGRESO:'📥 INGRESO' };
+
+        const tablaStock = stockObra.length
+            ? `<h3 class="font-bold text-slate-700 mb-2">📦 MATERIAL Y HERRAMIENTAS EN OBRA AHORA</h3>
+               <table class="w-full text-sm mb-6">
+                <thead><tr class="bg-slate-100 text-slate-500 text-xs">
+                    <th class="p-2 text-left">PRODUCTO</th><th class="p-2 text-center">TIPO</th><th class="p-2 text-right">CANTIDAD</th>
+                </tr></thead>
+                <tbody>${stockObra.map(s => `
+                <tr class="border-b hover:bg-slate-50">
+                    <td class="p-2 font-bold">${s.Producto.nombre}</td>
+                    <td class="p-2 text-center text-xs">${iconTipo[s.Producto.tipo] || ''} ${s.Producto.tipo}</td>
+                    <td class="p-2 text-right font-mono text-blue-600 font-bold">${s.cantidad} ${s.Producto.unidad}</td>
+                </tr>`).join('')}</tbody>
+               </table>`
+            : '<p class="text-slate-400 text-sm mb-4 italic">Sin material ni herramientas actualmente en esta obra.</p>';
+
+        const tablaMovs = movimientos.length
+            ? `<h3 class="font-bold text-slate-700 mb-2">📋 HISTORIAL DE MOVIMIENTOS</h3>
+               <table class="w-full text-sm">
+                <thead><tr class="bg-slate-100 text-slate-500 text-xs">
+                    <th class="p-2 text-left">PRODUCTO</th>
+                    <th class="p-2 text-center">MOVIMIENTO</th>
+                    <th class="p-2 text-right">CANT.</th>
+                    <th class="p-2 text-center">FECHA</th>
+                    <th class="p-2 text-center">USUARIO</th>
+                </tr></thead>
+                <tbody>${movimientos.map(m => `
+                <tr class="border-b hover:bg-slate-50">
+                    <td class="p-2 font-bold text-slate-700">${m.Producto.nombre}</td>
+                    <td class="p-2 text-center text-xs">${iconMov[m.tipo] || m.tipo}</td>
+                    <td class="p-2 text-right font-mono">${m.cantidad}</td>
+                    <td class="p-2 text-center text-xs text-slate-500">${new Date(m.fecha).toLocaleDateString('es-AR')} ${new Date(m.fecha).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</td>
+                    <td class="p-2 text-center text-xs text-slate-500">${m.usuario}</td>
+                </tr>`).join('')}</tbody>
+               </table>`
+            : '<p class="text-slate-400 text-sm italic">Sin movimientos registrados.</p>';
+
+        contenido.innerHTML = tablaStock + tablaMovs;
+    } catch (e) { contenido.innerHTML = '<p class="text-red-500 text-sm p-4">Error cargando datos.</p>'; }
+}
+
+async function cargarReporteGlobal() {
+    const contenido = document.getElementById('contenido-reporte');
+    contenido.innerHTML = '<p class="text-slate-400 text-sm p-4">Cargando...</p>';
+    try {
+        const res = await fetch('/logistica/reporte-obras');
+        const lista = await res.json();
+
+        if (!lista.length) {
+            contenido.innerHTML = '<p class="text-slate-400 text-center p-4">Sin movimientos registrados.</p>';
+            return;
+        }
+
+        const iconMov = {
+            INGRESO:         '📥 INGRESO',
+            CONSUMO:         '🪣 CONSUMO',
+            CONSUMO_DIRECTO: '🛒 COMPRA DIRECTA',
+            TRASLADO:        '🔄 TRASLADO'
+        };
+        const colorMov = {
+            INGRESO:         'bg-green-100 text-green-700',
+            CONSUMO:         'bg-red-100 text-red-700',
+            CONSUMO_DIRECTO: 'bg-orange-100 text-orange-700',
+            TRASLADO:        'bg-blue-100 text-blue-700'
         };
 
-        if(!data.nombre || !data.cantidad) return alert("Completar nombre y cantidad");
+        contenido.innerHTML = `
+            <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="bg-slate-200 text-slate-600 text-xs">
+                    <th class="p-2 text-left">FECHA</th>
+                    <th class="p-2 text-center">MOVIMIENTO</th>
+                    <th class="p-2 text-left">PRODUCTO</th>
+                    <th class="p-2 text-right">CANT.</th>
+                    <th class="p-2 text-center">ORIGEN</th>
+                    <th class="p-2 text-center">DESTINO</th>
+                    <th class="p-2 text-center">USUARIO</th>
+                </tr></thead>
+                <tbody>${lista.map(m => {
+                    const fecha = new Date(m.fecha);
+                    const fechaStr = fecha.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+                    const horaStr  = fecha.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
+                    const color = colorMov[m.tipo_movimiento] || 'bg-slate-100 text-slate-600';
+                    return `<tr class="border-b hover:bg-slate-50">
+                        <td class="p-2 text-xs text-slate-500 whitespace-nowrap">${fechaStr}<br><span class="text-slate-400">${horaStr}</span></td>
+                        <td class="p-2 text-center"><span class="px-2 py-1 rounded-full text-xs font-bold ${color}">${iconMov[m.tipo_movimiento] || m.tipo_movimiento}</span></td>
+                        <td class="p-2 font-bold text-slate-700">${m.producto}</td>
+                        <td class="p-2 text-right font-mono font-bold text-blue-600">${m.cantidad}</td>
+                        <td class="p-2 text-center text-xs text-slate-500">${m.origen}</td>
+                        <td class="p-2 text-center text-xs text-slate-500">${m.destino}</td>
+                        <td class="p-2 text-center text-xs text-slate-500">${m.usuario}</td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table>
+            </div>`;
+    } catch (e) { contenido.innerHTML = '<p class="text-red-500 text-sm p-4">Error cargando reporte.</p>'; }
+}
 
-        const ruta = modoActual === 'ingreso' ? '/logistica/ingreso' : '/logistica/consumo';
-        
-        if (modoActual === 'ingreso') {
-            data.stock_minimo = document.getElementById('prod-minimo').value;
-            data.es_stockeable = document.getElementById('prod-stockeable').checked;
-        } else {
-            data.destino_obra = document.getElementById('prod-obra').value;
-        }
+// ─── BAJA ─────────────────────────────────────────────────────────────────────
+async function darBaja(id, nombre) {
+    if (!confirm(`¿Dar de baja "${nombre}"?\nEl historial se conserva.`)) return;
+    const res    = await fetch('/logistica/productos/baja', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ productoId: id })
+    });
+    const result = await res.json();
+    if (result.success) { alert('✅ Producto dado de baja'); await recargarBase(); await cargarEstado(); }
+    else alert('❌ ' + (result.error || 'Error'));
+}
 
-        try {
-            const res = await fetch(ruta, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-            
-            if (res.status === 401) return alert("SESIÓN EXPIRADA: Volvé a loguearte en la página principal.");
-            
-            const result = await res.json();
-            if (result.success) {
-                alert("✅ Registrado con éxito");
-                cerrarModal();
-                cargarEstado();
-            } else {
-                alert("❌ Error: " + (result.message || "Fallo en base de datos"));
-            }
-        } catch (e) {
-            alert("📡 Error de conexión con el servidor");
-        }
-    }
-
-    async function cargarEstado() {
-        try {
-            const res = await fetch('/logistica/estado');
-            if (res.status === 401) {
-                document.getElementById('user-display').innerText = "⚠️ SIN SESIÓN";
-                return;
-            }
-            const { inventario, alertas } = await res.json();
-            document.getElementById('user-display').innerText = "✅ Sesión Activa";
-
-            const tabla = document.getElementById('tabla-stock');
-            tabla.innerHTML = inventario.length ? inventario.map(item => `
-                <tr class="border-b hover:bg-slate-50 transition">
-                    <td class="p-2 font-bold text-slate-700">${item.Producto.nombre}</td>
-                    <td class="p-2 text-center text-slate-500">${item.Deposito.nombre}</td>
-                    <td class="p-2 text-right font-mono font-bold text-blue-600">${item.cantidad}</td>
-                </tr>`).join('') : '<tr><td colspan="3" class="p-4 text-center text-slate-400">No hay stock registrado</td></tr>';
-
-            const seccionAlertas = document.getElementById('seccion-alertas');
-            if (alertas && alertas.length > 0) {
-                seccionAlertas.classList.remove('hidden');
-                document.getElementById('lista-alertas').innerHTML = alertas.map(a => 
-                    `<li><strong>${a.Producto.nombre}</strong>: Quedan ${a.cantidad} (Mínimo: ${a.Producto.stock_minimo})</li>`).join('');
-            } else {
-                seccionAlertas.classList.add('hidden');
-            }
-        } catch (e) {
-            console.error("Error de carga:", e);
-        }
-    }
-    </script>
+// ─── EXCEL ────────────────────────────────────────────────────────────────────
+function descargarExcelGeneral() {
+    window.location.href = '/logistica/excel/general';
+}
+function descargarExcelObra() {
+    if (!obraSeleccionadaId) return alert('Seleccionar una obra primero');
+    window.location.href = `/logistica/excel/ubicacion/${obraSeleccionadaId}`;
+}
+</script>
 </body>
 </html>

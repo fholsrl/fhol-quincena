@@ -1,148 +1,498 @@
-const express = require('express');
-const router = express.Router();
-// Importamos desde el nuevo archivo de base de datos independiente
-const { Producto, Deposito, Stock, Movimiento } = require('./database_logistica');
+const express  = require('express');
+const router   = express.Router();
+const { Op }   = require('sequelize');
+const ExcelJS  = require('exceljs');
+const { Producto, Ubicacion, Stock, Movimiento } = require('./database_logistica');
+const { Empleado } = require('./database');
 
-// Función para proteger las rutas (usa la sesión del index.js principal)
 const proteger = (req, res, next) => {
     if (req.session.user) return next();
     res.status(401).send("No autorizado");
 };
 
-// 1. CARGAR INGRESO (Compra o entrada a depósito)
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+
+async function sincronizarUbicaciones() {
+    const empleados = await Empleado.findAll({ attributes: ['obra'], group: ['obra'] });
+    for (const emp of empleados) {
+        if (emp.obra) {
+            const nombreNormalizado = emp.obra.trim().toUpperCase();
+            await Ubicacion.findOrCreate({
+                where: { nombre: nombreNormalizado },
+                defaults: { tipo_ubicacion: 'OBRA' }
+            });
+        }
+    }
+}
+
+// Mueve stock entre ubicaciones, lanza error si no alcanza
+async function moverStock(productoId, origenId, destinoId, cantidad) {
+    const origen = await Stock.findOne({ where: { productoId, ubicacionId: origenId } });
+    if (!origen || parseFloat(origen.cantidad) < parseFloat(cantidad)) {
+        throw new Error('Stock insuficiente en la ubicación de origen');
+    }
+    origen.cantidad = parseFloat(origen.cantidad) - parseFloat(cantidad);
+    await origen.save();
+
+    const [destino] = await Stock.findOrCreate({
+        where: { productoId, ubicacionId: destinoId },
+        defaults: { cantidad: 0, stock_inicial: 0 }
+    });
+    destino.cantidad = parseFloat(destino.cantidad) + parseFloat(cantidad);
+    await destino.save();
+}
+
+// ─── UBICACIONES ─────────────────────────────────────────────────────────────
+
+router.get('/ubicaciones', proteger, async (req, res) => {
+    try {
+        await sincronizarUbicaciones();
+        const lista = await Ubicacion.findAll({ order: [['tipo_ubicacion','ASC'],['nombre','ASC']] });
+        res.json(lista);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Stock disponible en una ubicación específica (para filtrar productos al retirar)
+router.get('/stock-en/:ubicacionId', proteger, async (req, res) => {
+    try {
+        const items = await Stock.findAll({
+            where: { ubicacionId: req.params.ubicacionId, cantidad: { [Op.gt]: 0 } },
+            include: [{ model: Producto, where: { activo: true } }],
+            order: [[Producto, 'nombre', 'ASC']]
+        });
+        res.json(items);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── PRODUCTOS ───────────────────────────────────────────────────────────────
+
+router.get('/productos', proteger, async (req, res) => {
+    try {
+        const lista = await Producto.findAll({ where: { activo: true }, order: [['nombre','ASC']] });
+        res.json(lista);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/productos/baja', proteger, async (req, res) => {
+    try {
+        await Producto.update({ activo: false }, { where: { id: req.body.productoId } });
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ─── INGRESO ─────────────────────────────────────────────────────────────────
+
 router.post('/ingreso', proteger, async (req, res) => {
     try {
-        const { nombre, cantidad, depositoId, stock_minimo, es_stockeable } = req.body;
-        const usuarioActual = req.session.user.username;
+        const { nombre, cantidad, ubicacionId, stock_minimo, tipo } = req.body;
+        const usuario     = req.session.user.username;
+        const tipoProducto = tipo || 'CONSUMIBLE';
+        const cant        = parseFloat(cantidad);
 
-        // Buscamos o creamos el producto en el catálogo
-        const [producto, creado] = await Producto.findOrCreate({
-            where: { nombre: nombre.toUpperCase() },
-            defaults: { 
-                stock_minimo: stock_minimo || 0, 
-                es_stockeable: es_stockeable ?? true 
-            }
-        });
-
-        // Si es un producto que se guarda en depósito, actualizamos la tabla Stocks
-        if (producto.es_stockeable) {
-            const [regStock, _] = await Stock.findOrCreate({
-                where: { productoId: producto.id, depositoId: depositoId },
-                defaults: { cantidad: 0 }
+        // Buscar sin filtro de activo para poder reactivar productos dados de baja
+        let producto = await Producto.findOne({ where: { nombre: nombre.toUpperCase() } });
+        if (producto) {
+            // Reactivar si estaba de baja y actualizar datos
+            producto.activo      = true;
+            producto.tipo        = tipoProducto;
+            if (stock_minimo) producto.stock_minimo = stock_minimo;
+            await producto.save();
+        } else {
+            producto = await Producto.create({
+                nombre: nombre.toUpperCase(),
+                stock_minimo: stock_minimo || 0,
+                tipo: tipoProducto,
+                activo: true
             });
-            regStock.cantidad = parseFloat(regStock.cantidad) + parseFloat(cantidad);
-            await regStock.save();
         }
 
-        // Registramos el movimiento (el historial)
+        if (tipoProducto !== 'NO_STOCKEABLE') {
+            const [reg] = await Stock.findOrCreate({
+                where: { productoId: producto.id, ubicacionId },
+                defaults: { cantidad: 0, stock_inicial: 0 }
+            });
+            reg.cantidad      = parseFloat(reg.cantidad) + cant;
+            reg.stock_inicial = parseFloat(reg.stock_inicial) + cant;
+            await reg.save();
+        }
+
         await Movimiento.create({
-            tipo: 'INGRESO',
-            cantidad: cantidad,
-            productoId: producto.id,
-            depositoId: depositoId,
-            usuario: usuarioActual
+            tipo: 'INGRESO', cantidad: cant, productoId: producto.id,
+            ubicacion_destino_id: ubicacionId, usuario, fecha: new Date()
         });
 
         res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-// 2. REGISTRAR CONSUMO (Salida a obra o uso directo)
+// ─── TRASLADO ─────────────────────────────────────────────────────────────────
+// Mueve stock (consumible o retornable) de una ubicación a otra.
+// No genera consumo — el stock sigue existiendo en el destino.
+
+router.post('/traslado', proteger, async (req, res) => {
+    try {
+        const { productoId, cantidad, ubicacionOrigenId, ubicacionDestinoId } = req.body;
+        const usuario = req.session.user.username;
+
+        await moverStock(productoId, ubicacionOrigenId, ubicacionDestinoId, cantidad);
+
+        await Movimiento.create({
+            tipo: 'TRASLADO', cantidad, productoId,
+            ubicacion_origen_id:  ubicacionOrigenId,
+            ubicacion_destino_id: ubicacionDestinoId,
+            usuario, fecha: new Date()
+        });
+
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ─── CONSUMO ──────────────────────────────────────────────────────────────────
+// El producto sale del stock definitivamente y se registra en el historial de la obra.
+
 router.post('/consumo', proteger, async (req, res) => {
     try {
-        const { productoId, cantidad, depositoId, destino_obra } = req.body;
-        const usuarioActual = req.session.user.username;
+        const { productoId, cantidad, ubicacionOrigenId, ubicacionDestinoId } = req.body;
+        const usuario = req.session.user.username;
 
-        // 1. Buscamos el producto para ver si es stockeable
-        const producto = await Producto.findByPk(productoId);
-        
-        if (producto.es_stockeable) {
-            const regStock = await Stock.findOne({
-                where: { productoId, depositoId }
-            });
-
-            if (!regStock || regStock.cantidad < cantidad) {
-                return res.status(400).json({ success: false, message: "Stock insuficiente" });
-            }
-
-            regStock.cantidad = parseFloat(regStock.cantidad) - parseFloat(cantidad);
-            await regStock.save();
+        const reg = await Stock.findOne({ where: { productoId, ubicacionId: ubicacionOrigenId } });
+        if (!reg || parseFloat(reg.cantidad) < parseFloat(cantidad)) {
+            return res.status(400).json({ success: false, message: 'Stock insuficiente' });
         }
+        reg.cantidad = parseFloat(reg.cantidad) - parseFloat(cantidad);
+        await reg.save();
+        // Si llega a 0, el registro queda en 0 pero no aparece en las vistas (filtro > 0)
 
-        // 2. Registramos el consumo en el historial
         await Movimiento.create({
-            tipo: 'CONSUMO',
-            cantidad: cantidad,
-            productoId: productoId,
-            depositoId: depositoId,
-            destino_obra: destino_obra,
-            usuario: usuarioActual
+            tipo: 'CONSUMO', cantidad, productoId,
+            ubicacion_origen_id:  ubicacionOrigenId,
+            ubicacion_destino_id: ubicacionDestinoId, // obra que consumió
+            usuario, fecha: new Date()
         });
 
         res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-// 3. CONSULTAR ESTADO Y ALERTAS (El 30%)
-router.get('/estado', proteger, async (req, res) => {
+// ─── COMPRA DIRECTA ───────────────────────────────────────────────────────────
+
+router.post('/consumo-directo', proteger, async (req, res) => {
     try {
-        const inventario = await Stock.findAll({
-            include: [Producto, Deposito]
+        const { nombre, cantidad, ubicacionDestinoId } = req.body;
+        const usuario = req.session.user.username;
+
+        const [producto] = await Producto.findOrCreate({
+            where: { nombre: nombre.toUpperCase() },
+            defaults: { tipo: 'CONSUMIBLE', activo: true }
         });
 
-        // Calculamos las alertas del 30%
+        await Movimiento.create({
+            tipo: 'CONSUMO_DIRECTO', cantidad, productoId: producto.id,
+            ubicacion_destino_id: ubicacionDestinoId,
+            usuario, fecha: new Date()
+        });
+
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ─── ESTADO GENERAL ───────────────────────────────────────────────────────────
+
+router.get('/estado', proteger, async (req, res) => {
+    try {
+        await sincronizarUbicaciones();
+        const inventario = await Stock.findAll({
+            where: { cantidad: { [Op.gt]: 0 } },
+            include: [{ model: Producto, where: { activo: true } }, Ubicacion],
+            order: [[Ubicacion,'nombre','ASC'],[Producto,'nombre','ASC']]
+        });
+
         const alertas = inventario.filter(item => {
-            const min = parseFloat(item.Producto.stock_minimo);
-            const actual = parseFloat(item.cantidad);
-            return min > 0 && actual <= (min * 0.30);
+            if (item.Producto.tipo === 'RETORNABLE') return false;
+            const inicial = parseFloat(item.stock_inicial) || 0;
+            const actual  = parseFloat(item.cantidad);
+            return inicial > 0 && actual <= (inicial * 0.30);
         });
 
         res.json({ inventario, alertas });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
-// --- RUTA 4: REPORTE DE CONSUMO POR OBRA ---
+
+// ─── VISTA POR OBRA ───────────────────────────────────────────────────────────
+
+router.get('/vista-obra/:ubicacionId', proteger, async (req, res) => {
+    try {
+        const { ubicacionId } = req.params;
+
+        const stockObra = await Stock.findAll({
+            where: { ubicacionId, cantidad: { [Op.gt]: 0 } },
+            include: [{ model: Producto, where: { activo: true } }]
+        });
+
+        const movimientos = await Movimiento.findAll({
+            where: {
+                [Op.or]: [
+                    { ubicacion_origen_id: ubicacionId },
+                    { ubicacion_destino_id: ubicacionId }
+                ]
+            },
+            include: [Producto],
+            order: [['fecha','DESC']],
+            limit: 200
+        });
+
+        res.json({ stockObra, movimientos });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── REPORTE GLOBAL POR OBRA ──────────────────────────────────────────────────
+
 router.get('/reporte-obras', proteger, async (req, res) => {
     try {
-        const consumos = await Movimiento.findAll({
-            where: { tipo: 'CONSUMO' },
+        const movimientos = await Movimiento.findAll({
             include: [Producto],
-            order: [['fecha', 'DESC']]
+            order: [['fecha','DESC']]
         });
-        
-        // Agrupamos los datos por obra para que sea fácil de leer
-        const reporte = consumos.reduce((acc, mov) => {
-            const obra = mov.destino_obra || 'SIN ESPECIFICAR';
-            if (!acc[obra]) acc[obra] = [];
-            acc[obra].push(mov);
-            return acc;
-        }, {});
 
-        res.json(reporte);
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+        // Cargar todas las ubicaciones para resolver nombres
+        const todasUbic = await Ubicacion.findAll();
+        const mapaUbic = Object.fromEntries(todasUbic.map(u => [u.id, u.nombre]));
+
+        const lista = movimientos.map(mov => ({
+            producto:        mov.Producto ? mov.Producto.nombre : '(eliminado)',
+            tipo_producto:   mov.Producto ? mov.Producto.tipo : '-',
+            tipo_movimiento: mov.tipo,
+            cantidad:        mov.cantidad,
+            origen:          mapaUbic[mov.ubicacion_origen_id]  || '-',
+            destino:         mapaUbic[mov.ubicacion_destino_id] || '-',
+            fecha:           mov.fecha,
+            usuario:         mov.usuario
+        }));
+
+        res.json(lista);
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// --- RUTA 5: ESTADÍSTICAS GENERALES ---
-router.get('/estadisticas', proteger, async (req, res) => {
+// ─── EXCEL: UBICACIÓN ESPECÍFICA ─────────────────────────────────────────────
+
+router.get('/excel/ubicacion/:ubicacionId', proteger, async (req, res) => {
     try {
-        const totalMovimientos = await Movimiento.count();
-        const productosBajoMinimo = await Stock.count({
-            // Aquí podrías sumar lógica más compleja, pero por ahora damos el conteo total
+        const ubicacion = await Ubicacion.findByPk(req.params.ubicacionId);
+        if (!ubicacion) return res.status(404).send('Ubicación no encontrada');
+
+        const stock = await Stock.findAll({
+            where: { ubicacionId: ubicacion.id, cantidad: { [Op.gt]: 0 } },
+            include: [{ model: Producto, where: { activo: true } }],
+            order: [[Producto,'tipo','ASC'],[Producto,'nombre','ASC']]
         });
-        
-        res.json({
-            totalMovimientos,
-            fechaActual: new Date()
+
+        const movimientos = await Movimiento.findAll({
+            where: {
+                [Op.or]: [
+                    { ubicacion_origen_id: ubicacion.id },
+                    { ubicacion_destino_id: ubicacion.id }
+                ]
+            },
+            include: [Producto],
+            order: [['fecha','DESC']]
         });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+
+        // Resolver nombres de ubicaciones
+        const todasUbic = await Ubicacion.findAll();
+        const mapaUbic = Object.fromEntries(todasUbic.map(u => [u.id, u.nombre]));
+
+        const wb = new ExcelJS.Workbook();
+        agregarHojaStock(wb, `Stock - ${ubicacion.nombre}`, stock);
+        agregarHojaMovimientos(wb, `Movimientos - ${ubicacion.nombre}`, movimientos, mapaUbic);
+
+        res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition',`attachment; filename=Stock_${ubicacion.nombre.replace(/\s/g,'_')}.xlsx`);
+        await wb.xlsx.write(res);
+        res.end();
+    } catch (e) { res.status(500).send(e.message); }
 });
+
+// ─── EXCEL: GENERAL (todas las ubicaciones) ───────────────────────────────────
+
+router.get('/excel/general', proteger, async (req, res) => {
+    try {
+        const stock = await Stock.findAll({
+            where: { cantidad: { [Op.gt]: 0 } },
+            include: [{ model: Producto, where: { activo: true } }, Ubicacion],
+        });
+
+        // Ordenar: OFICINA primero, luego depósitos, luego obras, todo alfabético dentro de cada grupo
+        stock.sort((a, b) => {
+            const aNombre = a.Ubicacion.nombre.toUpperCase();
+            const bNombre = b.Ubicacion.nombre.toUpperCase();
+            const aEsOficina = aNombre === 'OFICINA';
+            const bEsOficina = bNombre === 'OFICINA';
+            if (aEsOficina && !bEsOficina) return -1;
+            if (!aEsOficina && bEsOficina) return 1;
+            // Luego depósitos antes que obras
+            const aDeposito = a.Ubicacion.tipo_ubicacion === 'DEPOSITO';
+            const bDeposito = b.Ubicacion.tipo_ubicacion === 'DEPOSITO';
+            if (aDeposito && !bDeposito) return -1;
+            if (!aDeposito && bDeposito) return 1;
+            // Dentro del mismo grupo, alfabético por ubicación, luego tipo producto, luego nombre
+            if (aNombre !== bNombre) return aNombre.localeCompare(bNombre);
+            const aTipo = a.Producto.tipo;
+            const bTipo = b.Producto.tipo;
+            if (aTipo !== bTipo) return aTipo.localeCompare(bTipo);
+            return a.Producto.nombre.localeCompare(b.Producto.nombre);
+        });
+
+        const movimientos = await Movimiento.findAll({
+            include: [Producto],
+            order: [['fecha','DESC']]
+        });
+
+        // Resolver nombres de ubicaciones
+        const todasUbic = await Ubicacion.findAll();
+        const mapaUbic = Object.fromEntries(todasUbic.map(u => [u.id, u.nombre]));
+
+        const wb = new ExcelJS.Workbook();
+        agregarHojaStockGeneral(wb, stock);
+        agregarHojaMovimientos(wb, 'Historial completo', movimientos, mapaUbic);
+
+        res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition','attachment; filename=Logistica_General.xlsx');
+        await wb.xlsx.write(res);
+        res.end();
+    } catch (e) { res.status(500).send(e.message); }
+});
+
+// ─── HELPERS EXCEL ────────────────────────────────────────────────────────────
+
+function estiloHeader(cell, color) {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+}
+
+function agregarHojaStock(wb, nombre, stock) {
+    const ws = wb.addWorksheet(nombre.substring(0,31));
+    ws.columns = [
+        { header: 'TIPO',     key: 'tipo',     width: 15 },
+        { header: 'PRODUCTO', key: 'producto',  width: 35 },
+        { header: 'CANTIDAD', key: 'cantidad',  width: 14 },
+        { header: 'UNIDAD',   key: 'unidad',    width: 12 },
+    ];
+    ws.getRow(1).height = 24;
+    ws.getRow(1).eachCell(cell => estiloHeader(cell, 'FF1E3A8A'));
+
+    // Separar consumibles de retornables
+    const consumibles  = stock.filter(s => s.Producto.tipo !== 'RETORNABLE');
+    const retornables  = stock.filter(s => s.Producto.tipo === 'RETORNABLE');
+
+    if (consumibles.length) {
+        const sep = ws.addRow(['── CONSUMIBLES ──','','','']);
+        sep.getCell(1).font = { bold: true, italic: true, color: { argb: 'FF6B7280' } };
+        sep.getCell(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFF1F5F9' } };
+        ws.mergeCells(`A${sep.number}:D${sep.number}`);
+        consumibles.forEach(s => {
+            const r = ws.addRow({ tipo: s.Producto.tipo, producto: s.Producto.nombre, cantidad: parseFloat(s.cantidad), unidad: s.Producto.unidad });
+            r.eachCell(c => { c.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} }; c.alignment = { horizontal:'center' }; });
+            r.getCell(2).alignment = { horizontal:'left' };
+        });
+    }
+    if (retornables.length) {
+        const sep = ws.addRow(['── RETORNABLES / HERRAMIENTAS ──','','','']);
+        sep.getCell(1).font = { bold: true, italic: true, color: { argb: 'FF6B7280' } };
+        sep.getCell(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFF5F3FF' } };
+        ws.mergeCells(`A${sep.number}:D${sep.number}`);
+        retornables.forEach(s => {
+            const r = ws.addRow({ tipo: s.Producto.tipo, producto: s.Producto.nombre, cantidad: parseFloat(s.cantidad), unidad: s.Producto.unidad });
+            r.eachCell(c => { c.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} }; c.alignment = { horizontal:'center' }; });
+            r.getCell(2).alignment = { horizontal:'left' };
+        });
+    }
+}
+
+function agregarHojaStockGeneral(wb, stock) {
+    const ws = wb.addWorksheet('Stock General');
+    ws.columns = [
+        { header: 'UBICACIÓN',       key: 'ubicacion', width: 20 },
+        { header: 'TIPO UBICACIÓN',  key: 'tipoUbic',  width: 12 },
+        { header: 'TIPO PRODUCTO',   key: 'tipo',      width: 15 },
+        { header: 'PRODUCTO',        key: 'producto',  width: 35 },
+        { header: 'CANTIDAD',        key: 'cantidad',  width: 14 },
+        { header: 'UNIDAD',          key: 'unidad',    width: 12 },
+    ];
+    ws.getRow(1).height = 24;
+    ws.getRow(1).eachCell(cell => estiloHeader(cell, 'FF1E3A8A'));
+
+    const consumibles = stock.filter(s => s.Producto.tipo !== 'RETORNABLE');
+    const retornables = stock.filter(s => s.Producto.tipo === 'RETORNABLE');
+
+    const agregarGrupo = (lista, label, color) => {
+        if (!lista.length) return;
+        const sep = ws.addRow([label,'','','','','']);
+        sep.getCell(1).font = { bold: true, italic: true, color: { argb: 'FF6B7280' } };
+        sep.getCell(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb: color } };
+        ws.mergeCells(`A${sep.number}:F${sep.number}`);
+        lista.forEach(s => {
+            const r = ws.addRow({
+                ubicacion: s.Ubicacion.nombre,
+                tipoUbic:  s.Ubicacion.tipo_ubicacion,
+                tipo:      s.Producto.tipo,
+                producto:  s.Producto.nombre,
+                cantidad:  parseFloat(s.cantidad),
+                unidad:    s.Producto.unidad
+            });
+            r.eachCell(c => { c.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} }; c.alignment = { horizontal:'center' }; });
+            r.getCell(4).alignment = { horizontal:'left' };
+        });
+    };
+
+    agregarGrupo(consumibles, '── CONSUMIBLES ──', 'FFF1F5F9');
+    agregarGrupo(retornables, '── RETORNABLES / HERRAMIENTAS ──', 'FFF5F3FF');
+}
+
+function agregarHojaMovimientos(wb, nombre, movimientos, mapaUbic) {
+    const ws = wb.addWorksheet(nombre.substring(0,31));
+    ws.columns = [
+        { header: 'FECHA',      key: 'fecha',    width: 20 },
+        { header: 'TIPO',       key: 'tipo',     width: 18 },
+        { header: 'PRODUCTO',   key: 'producto', width: 30 },
+        { header: 'CANTIDAD',   key: 'cantidad', width: 12 },
+        { header: 'ORIGEN',     key: 'origen',   width: 22 },
+        { header: 'DESTINO',    key: 'destino',  width: 22 },
+        { header: 'USUARIO',    key: 'usuario',  width: 15 },
+    ];
+    ws.getRow(1).height = 24;
+    ws.getRow(1).eachCell(cell => estiloHeader(cell, 'FF4B5563'));
+
+    const colorTipo = {
+        INGRESO:         'FF059669',
+        CONSUMO:         'FFDC2626',
+        CONSUMO_DIRECTO: 'FFEA580C',
+        TRASLADO:        'FF2563EB'
+    };
+
+    movimientos.forEach(m => {
+        const fecha = new Date(m.fecha);
+        const fechaStr = `${fecha.toLocaleDateString('es-AR')} ${fecha.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
+        const r = ws.addRow({
+            fecha:    fechaStr,
+            tipo:     m.tipo,
+            producto: m.Producto ? m.Producto.nombre : '(eliminado)',
+            cantidad: parseFloat(m.cantidad),
+            origen:   (mapaUbic && mapaUbic[m.ubicacion_origen_id])  || '-',
+            destino:  (mapaUbic && mapaUbic[m.ubicacion_destino_id]) || '-',
+            usuario:  m.usuario
+        });
+        r.eachCell(c => {
+            c.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
+            c.alignment = { horizontal:'center' };
+        });
+        r.getCell(3).alignment = { horizontal:'left' };
+        // Color suave de fondo según tipo
+        const color = colorTipo[m.tipo];
+        if (color) {
+            r.getCell(2).font = { bold: true, color: { argb: 'FF' + color.slice(2) } };
+        }
+    });
+}
+
 module.exports = router;

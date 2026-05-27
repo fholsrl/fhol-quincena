@@ -8,6 +8,10 @@
 <body class="bg-slate-100 p-4 md:p-8">
     <div class="max-w-4xl mx-auto space-y-6">
         <h1 class="text-3xl font-extrabold text-slate-800 border-b-4 border-blue-600 pb-2 text-center">🏗️ FHOL SRL: PANEL DE CONTROL</h1>
+        <div class="flex justify-end items-center gap-2">
+            <a id="btn-ir-logistica" href="/logistica.html" class="hidden bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition">📦 IR A LOGÍSTICA</a>
+            <button onclick="cerrarSesion()" class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition">🚪 SALIR</button>
+        </div>
         
         <div class="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
             <h2 class="text-lg font-bold mb-4 text-slate-700 underline">1. Registrar Nuevo Personal</h2>
@@ -93,21 +97,32 @@
             <tbody id="tabla-reporte"></tbody>
         </table>
     </div>
-    <div class="bg-slate-800 p-6 rounded-xl shadow-lg text-white mt-12 border-t-4 border-yellow-500">
-    <h2 class="text-xl font-bold mb-4">⚙️ Configuración de Usuarios</h2>
+    <div id="seccion-usuarios" class="hidden bg-slate-800 p-6 rounded-xl shadow-lg text-white mt-12 border-t-4 border-yellow-500">
+    <h2 class="text-xl font-bold mb-4">⚙️ Gestión de Usuarios</h2>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div class="space-y-3">
-            <p class="text-sm text-slate-400">Crear nuevo acceso o cambiar clave a uno existente:</p>
+            <p class="text-sm text-slate-400">Crear nuevo usuario o modificar uno existente:</p>
             <input id="user-name" placeholder="Nombre de Usuario" class="w-full p-2 rounded bg-slate-700 border-none text-white">
-            <input id="user-pass" type="password" placeholder="Nueva Contraseña" class="w-full p-2 rounded bg-slate-700 border-none text-white">
+            <input id="user-pass" type="password" placeholder="Contraseña (dejar vacío para no cambiar)" class="w-full p-2 rounded bg-slate-700 border-none text-white">
+            <div>
+                <p class="text-xs text-slate-400 mb-1 uppercase font-bold">Rol:</p>
+                <select id="user-rol" class="w-full p-2 rounded bg-slate-700 border-none text-white">
+                    <option value="usuario">Usuario</option>
+                    <option value="admin">Administrador</option>
+                </select>
+            </div>
+            <div>
+                <p class="text-xs text-slate-400 mb-1 uppercase font-bold">Acceso a módulos:</p>
+                <label class="flex items-center gap-2 text-sm mb-1"><input type="checkbox" id="mod-personal"  checked> Personal</label>
+                <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="mod-logistica" checked> Logística</label>
+            </div>
             <button onclick="guardarUsuario()" class="w-full bg-yellow-500 hover:bg-yellow-600 text-slate-900 font-bold py-2 rounded transition">
-                GUARDAR USUARIO / CLAVE
+                GUARDAR USUARIO
             </button>
         </div>
         <div class="bg-slate-700 p-4 rounded-lg">
-            <p class="text-xs font-bold uppercase mb-3 text-slate-400">Usuarios con permiso:</p>
-            <ul id="lista-usuarios" class="space-y-1 text-sm">
-                </ul>
+            <p class="text-xs font-bold uppercase mb-3 text-slate-400">Usuarios registrados:</p>
+            <ul id="lista-usuarios" class="space-y-2 text-sm"></ul>
         </div>
     </div>
 </div>
@@ -119,11 +134,32 @@
 // Usamos una sola función de inicio para que no haya conflictos
 window.onload = async () => {
     console.log("Iniciando aplicación...");
-    await refresh();       // Primero los empleados
-    await cargarUsuarios(); // Después los usuarios
+    // Verificar sesión y rol
+    const meRes = await fetch('/me');
+    if (meRes.status === 401) { window.location.href = '/login.html'; return; }
+    const me = await meRes.json();
+    if (!me.logueado) { window.location.href = '/login.html'; return; }
+    // Verificar que tenga acceso a PERSONAL
+    if (!(me.modulos || '').includes('PERSONAL')) {
+        window.location.href = '/login.html'; return;
+    }
+    if ((me.modulos || '').includes('LOGISTICA')) {
+        document.getElementById('btn-ir-logistica').classList.remove('hidden');
+    }
+    // Mostrar sección de usuarios solo si es admin
+    if (me.rol === 'admin') {
+        document.getElementById('seccion-usuarios').classList.remove('hidden');
+        await cargarUsuarios();
+    }
+    await refresh();
 };
 
 // --- 2. FUNCIÓN REFRESH (CORREGIDA) ---
+async function cerrarSesion() {
+    await fetch('/logout', { method: 'POST' });
+    window.location.href = '/login.html';
+}
+
 async function refresh() {
     try {
         const res = await fetch('/empleados');
@@ -233,26 +269,55 @@ function filtrarPorObra() {
 }
 
 async function guardarUsuario() {
-    const username = document.getElementById('user-name').value;
+    const username = document.getElementById('user-name').value.trim();
     const password = document.getElementById('user-pass').value;
-    if(!username || !password) return alert("Completar datos");
+    const rol      = document.getElementById('user-rol').value;
+    if (!username) return alert("Ingresá un nombre de usuario");
+
+    const modulos = [];
+    if (document.getElementById('mod-personal').checked)  modulos.push('PERSONAL');
+    if (document.getElementById('mod-logistica').checked) modulos.push('LOGISTICA');
+    if (!modulos.length) return alert("Seleccioná al menos un módulo");
 
     const res = await fetch('/usuarios/guardar', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username, password, rol, modulos: modulos.join(',') })
     });
     const data = await res.json();
     alert(data.message);
+    document.getElementById('user-name').value = '';
+    document.getElementById('user-pass').value = '';
     cargarUsuarios();
+}
+
+async function eliminarUsuario(username) {
+    if (!confirm(`¿Eliminar el usuario "${username}"?`)) return;
+    const res = await fetch('/usuarios/eliminar', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ username })
+    });
+    const data = await res.json();
+    if (data.success) cargarUsuarios();
+    else alert(data.message);
 }
 
 async function cargarUsuarios() {
     try {
         const res = await fetch('/usuarios');
+        if (!res.ok) return;
         const users = await res.json();
         const lista = document.getElementById('lista-usuarios');
-        lista.innerHTML = users.map(u => `<li class="border-b border-slate-600 py-1 text-slate-300">👤 ${u.username}</li>`).join('');
+        lista.innerHTML = users.map(u => `
+            <li class="flex justify-between items-center border-b border-slate-600 py-2">
+                <div>
+                    <span class="text-slate-200 font-bold">👤 ${u.username}</span>
+                    <span class="text-xs text-slate-400 ml-2">${u.rol === 'admin' ? '⭐ Admin' : 'Usuario'}</span>
+                    <div class="text-xs text-slate-500">${(u.modulos || '').split(',').join(' · ')}</div>
+                </div>
+                <button onclick="eliminarUsuario('${u.username}')" class="text-red-400 hover:text-red-300 text-xs font-bold ml-2">✕</button>
+            </li>`).join('');
     } catch (e) { console.error("Error cargando usuarios"); }
 }
 

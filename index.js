@@ -29,18 +29,28 @@ const proteger = (req, res, next) => {
 app.post('/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        // Buscamos en la tabla de Supabase que acabas de actualizar
         const user = await Usuario.findOne({ where: { username, password } });
 
         if (user) {
-            req.session.user = { id: user.id, username: user.username };
-            res.json({ success: true });
+            req.session.user = { id: user.id, username: user.username, rol: user.rol, modulos: user.modulos };
+            res.json({ success: true, rol: user.rol, modulos: user.modulos });
         } else {
             res.status(401).json({ success: false, message: "Usuario o clave incorrectos" });
         }
     } catch (e) {
         res.status(500).json({ success: false, message: e.message });
     }
+});
+
+app.post('/logout', (req, res) => {
+    req.session.destroy();
+    res.json({ success: true });
+});
+
+// Devuelve info del usuario logueado (para que los frontends sepan quién es)
+app.get('/me', (req, res) => {
+    if (!req.session.user) return res.status(401).json({ logueado: false });
+    res.json({ logueado: true, username: req.session.user.username, rol: req.session.user.rol, modulos: req.session.user.modulos });
 });
 
 // RUTAS
@@ -296,34 +306,52 @@ app.get('/descargar-excel', async (req, res) => {
     }
 });
 
-// 1. Crear o actualizar usuario
-app.post('/usuarios/guardar', proteger, async (req, res) => {
+// Middleware solo admin
+const soloAdmin = (req, res, next) => {
+    if (req.session.user && req.session.user.rol === 'admin') return next();
+    res.status(403).json({ success: false, message: "Solo el administrador puede gestionar usuarios" });
+};
+
+// 1. Crear o actualizar usuario (solo admin)
+app.post('/usuarios/guardar', proteger, soloAdmin, async (req, res) => {
     try {
-        const { username, password } = req.body;
-        // findOrCreate busca si existe, si no lo crea.
+        const { username, password, rol, modulos } = req.body;
         const [user, creado] = await Usuario.findOrCreate({
             where: { username },
-            defaults: { password }
+            defaults: { password, rol: rol || 'usuario', modulos: modulos || 'PERSONAL,LOGISTICA' }
         });
 
         if (!creado) {
-            // Si ya existía, actualizamos la contraseña
-            user.password = password;
+            if (password) user.password = password;
+            if (rol)      user.rol      = rol;
+            if (modulos !== undefined) user.modulos = modulos;
             await user.save();
         }
-        res.json({ success: true, message: creado ? "Usuario creado" : "Contraseña actualizada" });
-    } catch (e) { 
-        res.status(500).json({ success: false, message: e.message }); 
+        res.json({ success: true, message: creado ? "Usuario creado" : "Usuario actualizado" });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
     }
 });
 
-// 2. Listar usuarios (solo nombres, sin contraseñas)
-app.get('/usuarios', proteger, async (req, res) => {
+// 2. Listar usuarios (solo admin)
+app.get('/usuarios', proteger, soloAdmin, async (req, res) => {
     try {
-        const users = await Usuario.findAll({ attributes: ['username'] });
+        const users = await Usuario.findAll({ attributes: ['id', 'username', 'rol', 'modulos'] });
         res.json(users);
-    } catch (e) { 
-        res.status(500).json({ success: false, message: e.message }); 
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// 3. Eliminar usuario (solo admin)
+app.post('/usuarios/eliminar', proteger, soloAdmin, async (req, res) => {
+    try {
+        const { username } = req.body;
+        if (username === req.session.user.username) return res.status(400).json({ success: false, message: "No podés eliminarte a vos mismo" });
+        await Usuario.destroy({ where: { username } });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
     }
 });
 

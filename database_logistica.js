@@ -1,45 +1,48 @@
 const { Sequelize, DataTypes } = require('sequelize');
 
-// REEMPLAZA ESTA URL con la que tenés en tu archivo 'database.js'
-const sequelize = new Sequelize('postgres', 'postgres.qqzmbnpwmmxvjxmixteb', 'FholMarzo2026', {
-    host: 'aws-0-sa-east-1.pooler.supabase.com',
-    port: 6543,
+const sequelize = new Sequelize(process.env.DATABASE_URL || 'postgresql://postgres:FholMarzo2026@db.qqzmbnpwmmxvjxmixteb.supabase.co:6543/postgres', {
     dialect: 'postgres',
     logging: false,
     dialectOptions: {
-        ssl: {
-            require: true,
-            rejectUnauthorized: false 
-        }
+        ssl: { require: true, rejectUnauthorized: false }
     }
 });
+
 const Producto = sequelize.define('Producto', {
-    nombre: { type: DataTypes.STRING, allowNull: false },
-    unidad: { type: DataTypes.STRING, defaultValue: 'unidades' },
+    nombre:       { type: DataTypes.STRING,  allowNull: false },
+    unidad:       { type: DataTypes.STRING,  defaultValue: 'unidades' },
     stock_minimo: { type: DataTypes.DECIMAL, defaultValue: 0 },
-    es_stockeable: { type: DataTypes.BOOLEAN, defaultValue: true }
+    tipo:         { type: DataTypes.STRING,  defaultValue: 'CONSUMIBLE' }, // CONSUMIBLE | RETORNABLE | NO_STOCKEABLE
+    activo:       { type: DataTypes.BOOLEAN, defaultValue: true }
 }, { tableName: 'Productos' });
 
-const Deposito = sequelize.define('Deposito', {
-    nombre: { type: DataTypes.STRING, allowNull: false }
-}, { tableName: 'Depositos' });
+const Ubicacion = sequelize.define('Ubicacion', {
+    nombre:         { type: DataTypes.STRING, allowNull: false },
+    tipo_ubicacion: { type: DataTypes.STRING, defaultValue: 'DEPOSITO' } // DEPOSITO | OBRA
+}, { tableName: 'Ubicaciones' });
 
+// Stock: cantidad de cada producto en cada ubicación
+// Solo existe mientras haya cantidad > 0 (consumibles se eliminan al consumirse)
 const Stock = sequelize.define('Stock', {
-    cantidad: { type: DataTypes.DECIMAL, defaultValue: 0 }
+    cantidad:      { type: DataTypes.DECIMAL, defaultValue: 0 },
+    stock_inicial: { type: DataTypes.DECIMAL, defaultValue: 0 }
 }, { tableName: 'Stocks' });
 
+// Movimiento: historial completo de todo lo que pasó
 const Movimiento = sequelize.define('Movimiento', {
-    tipo: { type: DataTypes.STRING }, // 'INGRESO' o 'CONSUMO'
-    cantidad: { type: DataTypes.DECIMAL },
-    destino_obra: { type: DataTypes.STRING },
-    usuario: { type: DataTypes.STRING },
-    fecha: { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
+    tipo:                 { type: DataTypes.STRING }, // INGRESO | CONSUMO | CONSUMO_DIRECTO | TRASLADO
+    cantidad:             { type: DataTypes.DECIMAL },
+    ubicacion_origen_id:  { type: DataTypes.INTEGER, allowNull: true },
+    ubicacion_destino_id: { type: DataTypes.INTEGER, allowNull: true },
+    usuario:              { type: DataTypes.STRING },
+    fecha:                { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
 }, { tableName: 'Movimientos' });
 
-// Relaciones exclusivas de logística
-Producto.hasMany(Stock, { foreignKey: 'productoId' });
-Stock.belongsTo(Producto, { foreignKey: 'productoId' });
-Deposito.hasMany(Stock, { foreignKey: 'depositoId' });
-Stock.belongsTo(Deposito, { foreignKey: 'depositoId' });
+Producto.hasMany(Stock,      { foreignKey: 'productoId' });
+Stock.belongsTo(Producto,    { foreignKey: 'productoId' });
+Ubicacion.hasMany(Stock,     { foreignKey: 'ubicacionId' });
+Stock.belongsTo(Ubicacion,   { foreignKey: 'ubicacionId' });
+Producto.hasMany(Movimiento, { foreignKey: 'productoId' });
+Movimiento.belongsTo(Producto, { foreignKey: 'productoId' });
 
-module.exports = { sequelize, Producto, Deposito, Stock, Movimiento };
+module.exports = { sequelize, Producto, Ubicacion, Stock, Movimiento };

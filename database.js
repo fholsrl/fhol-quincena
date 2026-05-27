@@ -1,16 +1,11 @@
 const { Sequelize, DataTypes } = require('sequelize');
 
 // CONFIGURACIÓN DESGLOSADA (Más segura y estable)
-const sequelize = new Sequelize('postgres', 'postgres.qqzmbnpwmmxvjxmixteb', 'FholMarzo2026', {
-    host: 'aws-0-sa-east-1.pooler.supabase.com',
-    port: 6543,
+const sequelize = new Sequelize(process.env.DATABASE_URL || 'postgresql://postgres:FholMarzo2026@db.qqzmbnpwmmxvjxmixteb.supabase.co:6543/postgres', {
     dialect: 'postgres',
     logging: false,
     dialectOptions: {
-        ssl: {
-            require: true,
-            rejectUnauthorized: false 
-        }
+        ssl: { require: true, rejectUnauthorized: false }
     }
 });
 
@@ -18,7 +13,8 @@ const sequelize = new Sequelize('postgres', 'postgres.qqzmbnpwmmxvjxmixteb', 'Fh
 const Usuario = sequelize.define('Usuario', {
     username: { type: DataTypes.STRING, unique: true, allowNull: false },
     password: { type: DataTypes.STRING, allowNull: false },
-    rol: { type: DataTypes.STRING, defaultValue: 'admin' }
+    rol:      { type: DataTypes.STRING, defaultValue: 'usuario' },
+    modulos:  { type: DataTypes.STRING, defaultValue: 'PERSONAL,LOGISTICA' } // CSV de módulos habilitados
 });
 
 const Empleado = sequelize.define('Empleado', {

@@ -3,45 +3,125 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - FHOL Quincena</title>
+    <title>Login - FHOL</title>
     <style>
-        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f2f5; margin: 0; }
-        .login-card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 300px; }
-        h2 { text-align: center; color: #1e3a8a; }
-        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { width: 100%; padding: 10px; background: #1e3a8a; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        button:hover { background: #2563eb; }
-        #mensaje { color: red; text-align: center; font-size: 14px; margin-top: 10px; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #f0f2f5; }
+        .card { background: white; padding: 2.5rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.12); width: 340px; }
+        .logo { text-align: center; margin-bottom: 1.8rem; }
+        .logo h1 { font-size: 1.8rem; font-weight: 900; color: #1e3a8a; }
+        .logo p  { font-size: 0.75rem; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
+        input { width: 100%; padding: 11px 14px; margin: 6px 0; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; transition: border .2s; }
+        input:focus { border-color: #1e3a8a; }
+        .btn-login { width: 100%; padding: 12px; background: #1e3a8a; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 800; font-size: 15px; margin-top: 10px; transition: background .2s; }
+        .btn-login:hover { background: #2563eb; }
+        #mensaje { color: #dc2626; text-align: center; font-size: 13px; margin-top: 10px; min-height: 18px; }
+
+        /* Pantalla de selección de módulo */
+        #pantalla-modulos { display: none; text-align: center; }
+        #pantalla-modulos h2 { font-size: 1rem; font-weight: 700; color: #475569; margin-bottom: 1.2rem; }
+        #pantalla-modulos .bienvenida { font-size: 0.85rem; color: #64748b; margin-bottom: 1rem; }
+        .btn-modulo { display: block; width: 100%; padding: 16px; margin: 10px 0; border: none; border-radius: 10px; cursor: pointer; font-weight: 800; font-size: 16px; transition: transform .1s, opacity .2s; }
+        .btn-modulo:hover { transform: scale(1.02); }
+        .btn-modulo:active { transform: scale(0.98); }
+        .btn-personal  { background: #1e3a8a; color: white; }
+        .btn-logistica { background: #ea580c; color: white; }
+        .btn-volver { background: none; border: none; color: #94a3b8; font-size: 12px; cursor: pointer; margin-top: 8px; text-decoration: underline; }
     </style>
 </head>
 <body>
-    <div class="login-card">
-        <h2>FHOL Quincena</h2>
-        <input type="text" id="username" placeholder="Usuario (admin)" required>
-        <input type="password" id="password" placeholder="Contraseña" required>
-        <button onclick="ingresar()">Ingresar</button>
-        <div id="mensaje"></div>
+    <div class="card">
+        <!-- Pantalla 1: Login -->
+        <div id="pantalla-login">
+            <div class="logo">
+                <h1>🏗️ FHOL</h1>
+                <p>Sistema de Gestión</p>
+            </div>
+            <input type="text"     id="username" placeholder="Usuario" autocomplete="username">
+            <input type="password" id="password" placeholder="Contraseña" autocomplete="current-password">
+            <button class="btn-login" onclick="ingresar()">INGRESAR</button>
+            <div id="mensaje"></div>
+        </div>
+
+        <!-- Pantalla 2: Elegir módulo -->
+        <div id="pantalla-modulos">
+            <div class="logo">
+                <h1>🏗️ FHOL</h1>
+            </div>
+            <p class="bienvenida" id="texto-bienvenida"></p>
+            <h2>¿A dónde querés ir?</h2>
+            <div id="botones-modulos"></div>
+            <button class="btn-volver" onclick="volver()">← Cambiar usuario</button>
+        </div>
     </div>
 
     <script>
-        async function ingresar() {
-            const user = document.getElementById('username').value;
-            const pass = document.getElementById('password').value;
-            const msg = document.getElementById('mensaje');
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && document.getElementById('pantalla-login').style.display !== 'none') ingresar();
+        });
 
-            const res = await fetch('/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: user, password: pass })
-            });
-
-            const data = await res.json();
-
-            if (data.success) {
-                window.location.href = '/'; // Si entra bien, nos manda al panel principal
-            } else {
-                msg.innerText = data.message || "Error al ingresar";
+        // Si ya hay sesión activa, ir directo a elegir módulo
+        window.onload = async () => {
+            const res = await fetch('/me');
+            if (res.ok) {
+                const data = await res.json();
+                if (data.logueado) mostrarModulos(data.username, data.modulos, data.rol);
             }
+        };
+
+        async function ingresar() {
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const msg      = document.getElementById('mensaje');
+            msg.innerText  = '';
+
+            if (!username || !password) { msg.innerText = 'Completá usuario y contraseña'; return; }
+
+            try {
+                const res  = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    mostrarModulos(username, data.modulos, data.rol);
+                } else {
+                    msg.innerText = data.message || 'Usuario o contraseña incorrectos';
+                }
+            } catch (e) {
+                msg.innerText = 'Error de conexión';
+            }
+        }
+
+        function mostrarModulos(username, modulosStr, rol) {
+            document.getElementById('pantalla-login').style.display = 'none';
+            document.getElementById('pantalla-modulos').style.display = 'block';
+            document.getElementById('texto-bienvenida').innerText = `Bienvenido, ${username}${rol === 'admin' ? ' (Admin)' : ''}`;
+
+            const modulos = (modulosStr || '').split(',').map(m => m.trim()).filter(Boolean);
+            const contenedor = document.getElementById('botones-modulos');
+            contenedor.innerHTML = '';
+
+            if (modulos.includes('PERSONAL')) {
+                contenedor.innerHTML += `<button class="btn-modulo btn-personal" onclick="ir('/')">📋 PERSONAL</button>`;
+            }
+            if (modulos.includes('LOGISTICA')) {
+                contenedor.innerHTML += `<button class="btn-modulo btn-logistica" onclick="ir('/logistica.html')">📦 LOGÍSTICA</button>`;
+            }
+            if (!modulos.length) {
+                contenedor.innerHTML = '<p style="color:#dc2626;font-size:13px">Sin módulos asignados. Contactá al administrador.</p>';
+            }
+        }
+
+        function ir(url) { window.location.href = url; }
+
+        function volver() {
+            document.getElementById('pantalla-modulos').style.display = 'none';
+            document.getElementById('pantalla-login').style.display = 'block';
+            document.getElementById('password').value = '';
+            document.getElementById('mensaje').innerText = '';
         }
     </script>
 </body>
