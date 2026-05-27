@@ -12,31 +12,28 @@ const Producto = sequelize.define('Producto', {
     nombre:       { type: DataTypes.STRING,  allowNull: false },
     unidad:       { type: DataTypes.STRING,  defaultValue: 'unidades' },
     stock_minimo: { type: DataTypes.DECIMAL, defaultValue: 0 },
-    tipo:         { type: DataTypes.STRING,  defaultValue: 'CONSUMIBLE' }, // CONSUMIBLE | RETORNABLE | NO_STOCKEABLE
+    tipo:         { type: DataTypes.STRING,  defaultValue: 'CONSUMIBLE' },
     activo:       { type: DataTypes.BOOLEAN, defaultValue: true }
-}, { tableName: 'Productos' });
+}, { tableName: 'Productos', timestamps: false });
 
 const Ubicacion = sequelize.define('Ubicacion', {
     nombre:         { type: DataTypes.STRING, allowNull: false },
-    tipo_ubicacion: { type: DataTypes.STRING, defaultValue: 'DEPOSITO' } // DEPOSITO | OBRA
-}, { tableName: 'Ubicaciones' });
+    tipo_ubicacion: { type: DataTypes.STRING, defaultValue: 'DEPOSITO' }
+}, { tableName: 'Ubicaciones', timestamps: false });
 
-// Stock: cantidad de cada producto en cada ubicación
-// Solo existe mientras haya cantidad > 0 (consumibles se eliminan al consumirse)
 const Stock = sequelize.define('Stock', {
     cantidad:      { type: DataTypes.DECIMAL, defaultValue: 0 },
     stock_inicial: { type: DataTypes.DECIMAL, defaultValue: 0 }
-}, { tableName: 'Stocks' });
+}, { tableName: 'Stocks', timestamps: false });
 
-// Movimiento: historial completo de todo lo que pasó
 const Movimiento = sequelize.define('Movimiento', {
-    tipo:                 { type: DataTypes.STRING }, // INGRESO | CONSUMO | CONSUMO_DIRECTO | TRASLADO
+    tipo:                 { type: DataTypes.STRING },
     cantidad:             { type: DataTypes.DECIMAL },
     ubicacion_origen_id:  { type: DataTypes.INTEGER, allowNull: true },
     ubicacion_destino_id: { type: DataTypes.INTEGER, allowNull: true },
     usuario:              { type: DataTypes.STRING },
     fecha:                { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
-}, { tableName: 'Movimientos' });
+}, { tableName: 'Movimientos', timestamps: false });
 
 Producto.hasMany(Stock,      { foreignKey: 'productoId' });
 Stock.belongsTo(Producto,    { foreignKey: 'productoId' });
