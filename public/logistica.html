@@ -685,8 +685,8 @@ function renderHerramientas() {
             <td class="p-2 text-center">
                 <div class="flex gap-1 justify-center flex-wrap">
                     ${h.estado !== 'BAJA' ? `<button onclick="moverHerramienta(${h.id},'${h.nro_serie}')" class="bg-blue-600 text-white text-xs px-2 py-1 rounded hover:bg-blue-700">Mover</button>` : ''}
-                    ${h.estado === 'DISPONIBLE' ? `<button onclick="cambiarEstadoHerr(${h.id},'REPARACION')" class="bg-yellow-500 text-white text-xs px-2 py-1 rounded hover:bg-yellow-600">Reparación</button>` : ''}
-                    ${h.estado === 'REPARACION' ? `<button onclick="cambiarEstadoHerr(${h.id},'DISPONIBLE')" class="bg-green-600 text-white text-xs px-2 py-1 rounded hover:bg-green-700">Disponible</button>` : ''}
+                    ${(h.estado === 'DISPONIBLE' || h.estado === 'EN_OBRA') ? `<button onclick="cambiarEstadoHerr(${h.id},'REPARACION')" class="bg-yellow-500 text-white text-xs px-2 py-1 rounded hover:bg-yellow-600">Reparación</button>` : ''}
+                    ${h.estado !== 'DISPONIBLE' && h.estado !== 'BAJA' ? `<button onclick="cambiarEstadoHerr(${h.id},'DISPONIBLE')" class="bg-green-600 text-white text-xs px-2 py-1 rounded hover:bg-green-700">Disponible</button>` : ''}
                     ${h.estado !== 'BAJA' ? `<button onclick="cambiarEstadoHerr(${h.id},'BAJA')" class="bg-red-600 text-white text-xs px-2 py-1 rounded hover:bg-red-700">Baja</button>` : ''}
                 </div>
             </td>
