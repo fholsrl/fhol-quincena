@@ -497,6 +497,42 @@ function agregarHojaMovimientos(wb, nombre, movimientos, mapaUbic) {
 
 // ─── HERRAMIENTAS ────────────────────────────────────────────────────────────
 
+// Resumen de herramientas agrupado por producto (para stock general)
+router.get('/herramientas/resumen', proteger, async (req, res) => {
+    try {
+        const lista = await Herramienta.findAll({
+            where: { estado: { [Op.ne]: 'BAJA' } },
+            include: [
+                { model: Producto, attributes: ['id','nombre'] },
+                { model: Ubicacion, attributes: ['id','nombre'], required: false }
+            ]
+        });
+
+        // Agrupar por producto
+        const grupos = {};
+        lista.forEach(h => {
+            const pid = h.productoId;
+            if (!grupos[pid]) grupos[pid] = {
+                producto: h.Producto.nombre,
+                categoria: h.categoria,
+                total: 0, disponibles: 0, en_obra: 0, reparacion: 0,
+                detalle: []
+            };
+            grupos[pid].total++;
+            if (h.estado === 'DISPONIBLE') grupos[pid].disponibles++;
+            if (h.estado === 'EN_OBRA')    grupos[pid].en_obra++;
+            if (h.estado === 'REPARACION') grupos[pid].reparacion++;
+            grupos[pid].detalle.push({
+                nro_serie: h.nro_serie,
+                estado: h.estado,
+                ubicacion: h.Ubicacion ? h.Ubicacion.nombre : '-'
+            });
+        });
+
+        res.json(Object.values(grupos));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Listar todas las herramientas con producto y ubicación actual
 router.get('/herramientas', proteger, async (req, res) => {
     try {
@@ -509,6 +545,18 @@ router.get('/herramientas', proteger, async (req, res) => {
             order: [[Producto,'nombre','ASC'],['nro_serie','ASC']]
         });
         res.json(lista);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Productos que ya tienen herramientas registradas (para selector en formulario)
+router.get('/herramientas/productos', proteger, async (req, res) => {
+    try {
+        const productos = await Producto.findAll({
+            where: { tipo: 'RETORNABLE', activo: true },
+            attributes: ['id','nombre'],
+            order: [['nombre','ASC']]
+        });
+        res.json(productos);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
