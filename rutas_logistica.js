@@ -497,15 +497,49 @@ function agregarHojaMovimientos(wb, nombre, movimientos, mapaUbic) {
 
 // ─── HERRAMIENTAS ────────────────────────────────────────────────────────────
 
-// Renombrar producto
+// Renombrar o fusionar producto
 router.post('/productos/renombrar', proteger, async (req, res) => {
     try {
         const { productoId, nuevoNombre } = req.body;
         if (!nuevoNombre || !nuevoNombre.trim()) return res.status(400).json({ error: 'Nombre vacío' });
-        const existe = await Producto.findOne({ where: { nombre: nuevoNombre.trim().toUpperCase() } });
-        if (existe && existe.id !== productoId) return res.status(400).json({ error: 'Ya existe un producto con ese nombre' });
-        await Producto.update({ nombre: nuevoNombre.trim().toUpperCase() }, { where: { id: productoId } });
-        res.json({ success: true });
+        const nombreFinal = nuevoNombre.trim().toUpperCase();
+
+        // Ver si ya existe otro producto con ese nombre
+        const existente = await Producto.findOne({ where: { nombre: nombreFinal } });
+
+        if (existente && existente.id !== parseInt(productoId)) {
+            // FUSIONAR: mover todo del productoId al existente
+            const { Op: OpLocal } = require('sequelize');
+
+            // 1. Stocks: sumar cantidades si ya hay stock del existente en la misma ubicación
+            const stocksOrigen = await Stock.findAll({ where: { productoId } });
+            for (const so of stocksOrigen) {
+                const stockDest = await Stock.findOne({ where: { productoId: existente.id, ubicacionId: so.ubicacionId } });
+                if (stockDest) {
+                    stockDest.cantidad      = parseFloat(stockDest.cantidad)      + parseFloat(so.cantidad);
+                    stockDest.stock_inicial = parseFloat(stockDest.stock_inicial) + parseFloat(so.stock_inicial);
+                    await stockDest.save();
+                    await so.destroy();
+                } else {
+                    await so.update({ productoId: existente.id });
+                }
+            }
+
+            // 2. Movimientos
+            await Movimiento.update({ productoId: existente.id }, { where: { productoId } });
+
+            // 3. Herramientas
+            await Herramienta.update({ productoId: existente.id }, { where: { productoId } });
+
+            // 4. Eliminar el producto duplicado
+            await Producto.destroy({ where: { id: productoId } });
+
+            return res.json({ success: true, fusionado: true, nombre: nombreFinal });
+        }
+
+        // Si no existe o es el mismo, solo renombrar
+        await Producto.update({ nombre: nombreFinal }, { where: { id: productoId } });
+        res.json({ success: true, fusionado: false, nombre: nombreFinal });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
