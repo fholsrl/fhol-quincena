@@ -136,6 +136,21 @@
 </style>
 
 <script>
+async function editarNombreProducto(productoId, nombreActual) {
+    const nuevoNombre = prompt(`Editar nombre del producto:\n\nActual: ${nombreActual}\n\nNuevo nombre:`, nombreActual);
+    if (!nuevoNombre || nuevoNombre.trim() === nombreActual) return;
+    const res = await fetch('/logistica/productos/renombrar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productoId, nuevoNombre: nuevoNombre.trim() })
+    });
+    const data = await res.json();
+    if (data.error) return alert(data.error);
+    await cargarEstado();
+    await recargarBase();
+    if (document.getElementById('panel-herramientas').classList.contains('hidden') === false) cargarHerramientas();
+}
+
 async function cerrarSesion() {
     await fetch('/logout', { method: 'POST' });
     window.location.href = '/login.html';
@@ -439,6 +454,8 @@ async function cargarEstado() {
                 <td class="p-2 text-right font-mono font-bold text-blue-600">${actual} ${item.Producto.unidad}</td>
                 <td class="p-2 text-center"><span class="px-2 py-1 rounded-full text-xs ${color}">${estado}</span></td>
                 <td class="p-2 text-center">
+                    <button onclick="editarNombreProducto(${item.Producto.id},'${item.Producto.nombre.replace(/'/g,"\\'")}')""
+                        class="bg-blue-100 text-blue-600 text-xs font-bold px-2 py-1 rounded-lg hover:bg-blue-200 mr-1">✏️</button>
                     <button onclick="darBaja(${item.Producto.id},'${item.Producto.nombre.replace(/'/g,"\\'")}')""
                         class="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded-lg hover:bg-red-200">BAJA</button>
                 </td>
@@ -461,7 +478,11 @@ async function cargarEstado() {
                         <span class="mr-2 text-blue-600">🏗️ ${g.en_obra}</span>
                         ${g.reparacion > 0 ? `<span class="text-yellow-600">🔨 ${g.reparacion}</span>` : ''}
                     </td>
-                    <td class="p-2 text-xs text-slate-400" colspan="2">${g.detalle.map(d => `<span class="inline-block bg-slate-100 rounded px-1 mr-1 font-mono text-xs">${d.nro_serie} · ${d.ubicacion}</span>`).join('')}</td>
+                    <td class="p-2 text-xs text-slate-400">${g.detalle.map(d => `<span class="inline-block bg-slate-100 rounded px-1 mr-1 font-mono text-xs">${d.nro_serie} · ${d.ubicacion}</span>`).join('')}</td>
+                    <td class="p-2 text-center">
+                        <button onclick="editarNombreProducto(${g.productoId},'${g.producto.replace(/'/g,"\\'")}')""
+                            class="bg-blue-100 text-blue-600 text-xs font-bold px-2 py-1 rounded-lg hover:bg-blue-200">✏️</button>
+                    </td>
                 </tr>`).join('');
         }
 

@@ -497,6 +497,18 @@ function agregarHojaMovimientos(wb, nombre, movimientos, mapaUbic) {
 
 // ─── HERRAMIENTAS ────────────────────────────────────────────────────────────
 
+// Renombrar producto
+router.post('/productos/renombrar', proteger, async (req, res) => {
+    try {
+        const { productoId, nuevoNombre } = req.body;
+        if (!nuevoNombre || !nuevoNombre.trim()) return res.status(400).json({ error: 'Nombre vacío' });
+        const existe = await Producto.findOne({ where: { nombre: nuevoNombre.trim().toUpperCase() } });
+        if (existe && existe.id !== productoId) return res.status(400).json({ error: 'Ya existe un producto con ese nombre' });
+        await Producto.update({ nombre: nuevoNombre.trim().toUpperCase() }, { where: { id: productoId } });
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Resumen de herramientas agrupado por producto (para stock general)
 router.get('/herramientas/resumen', proteger, async (req, res) => {
     try {
@@ -513,6 +525,7 @@ router.get('/herramientas/resumen', proteger, async (req, res) => {
         lista.forEach(h => {
             const pid = h.productoId;
             if (!grupos[pid]) grupos[pid] = {
+                productoId: pid,
                 producto: h.Producto.nombre,
                 categoria: h.categoria,
                 total: 0, disponibles: 0, en_obra: 0, reparacion: 0,
