@@ -77,7 +77,6 @@
                 <option value="DISPONIBLE">✅ Disponible</option>
                 <option value="EN_OBRA">🏗️ En obra</option>
                 <option value="REPARACION">🔨 En reparación</option>
-                <option value="BAJA">❌ De baja</option>
             </select>
             <input id="filtro-herr-nombre" oninput="cargarHerramientas()" placeholder="Buscar producto o nro serie..." class="border p-1 rounded text-sm flex-1">
         </div>
@@ -446,6 +445,25 @@ async function cargarEstado() {
             </tr>`;
         }).join('') : '<tr><td colspan="6" class="p-4 text-center text-slate-400">Sin stock registrado</td></tr>';
 
+        // Agregar herramientas al pie de la tabla
+        const resHerr = await fetch('/logistica/herramientas');
+        const herramientas = await resHerr.json();
+        if (herramientas.length) {
+            const catLabel = { ELECTRICA: '⚡ Herramienta Eléctrica', MAYOR: '🔩 Herramienta Mayor' };
+            const estColor = { DISPONIBLE:'bg-green-100 text-green-700', EN_OBRA:'bg-blue-100 text-blue-700', REPARACION:'bg-yellow-100 text-yellow-700', BAJA:'bg-red-100 text-red-700' };
+            const estLabel = { DISPONIBLE:'Disponible', EN_OBRA:'En obra', REPARACION:'En reparación', BAJA:'De baja' };
+            tabla.innerHTML += `<tr class="bg-slate-200"><td colspan="6" class="p-2 font-bold text-slate-600 text-xs uppercase">🔧 Herramientas con número de serie</td></tr>`;
+            tabla.innerHTML += herramientas.map(h => `
+                <tr class="border-b hover:bg-slate-50">
+                    <td class="p-2 font-bold text-slate-700">${h.Producto.nombre}</td>
+                    <td class="p-2 text-center text-xs text-slate-500">${catLabel[h.categoria] || h.categoria}</td>
+                    <td class="p-2 text-center text-xs text-slate-500">${h.Ubicacion ? h.Ubicacion.nombre : '-'}</td>
+                    <td class="p-2 text-center font-mono text-xs text-blue-700 font-bold">${h.nro_serie}</td>
+                    <td class="p-2 text-center"><span class="px-2 py-1 rounded-full text-xs ${estColor[h.estado]}">${estLabel[h.estado]}</span></td>
+                    <td class="p-2 text-center text-xs text-slate-400">${h.observaciones || '-'}</td>
+                </tr>`).join('');
+        }
+
         const sec = document.getElementById('seccion-alertas');
         if (alertas.length) {
             sec.classList.remove('hidden');
@@ -465,15 +483,22 @@ async function cargarVistaObra() {
     contenido.innerHTML = '<p class="text-slate-400 text-sm p-4">Cargando...</p>';
 
     try {
-        const res = await fetch(`/logistica/vista-obra/${ubicId}`);
-        const { stockObra, movimientos } = await res.json();
+        const [resObra, resHerr] = await Promise.all([
+            fetch(`/logistica/vista-obra/${ubicId}`),
+            fetch(`/logistica/herramientas/ubicacion/${ubicId}`)
+        ]);
+        const { stockObra, movimientos } = await resObra.json();
+        const herramientas = await resHerr.json();
 
         const iconTipo = { CONSUMIBLE:'🪣', RETORNABLE:'🔧', NO_STOCKEABLE:'📝' };
         const iconMov  = { CONSUMO:'🪣 CONSUMO', CONSUMO_DIRECTO:'🛒 COMPRA DIRECTA', TRASLADO:'🔄 TRASLADO', INGRESO:'📥 INGRESO' };
+        const estColor = { DISPONIBLE:'bg-green-100 text-green-700', EN_OBRA:'bg-blue-100 text-blue-700', REPARACION:'bg-yellow-100 text-yellow-700' };
+        const estLabel = { DISPONIBLE:'Disponible', EN_OBRA:'En obra', REPARACION:'En reparación' };
+        const catLabel = { ELECTRICA:'⚡ Eléctrica', MAYOR:'🔩 Mayor' };
 
         const tablaStock = stockObra.length
-            ? `<h3 class="font-bold text-slate-700 mb-2">📦 MATERIAL Y HERRAMIENTAS EN OBRA AHORA</h3>
-               <table class="w-full text-sm mb-6">
+            ? `<h3 class="font-bold text-slate-700 mb-2">📦 MATERIAL EN OBRA</h3>
+               <table class="w-full text-sm mb-4">
                 <thead><tr class="bg-slate-100 text-slate-500 text-xs">
                     <th class="p-2 text-left">PRODUCTO</th><th class="p-2 text-center">TIPO</th><th class="p-2 text-right">CANTIDAD</th>
                 </tr></thead>
@@ -484,13 +509,35 @@ async function cargarVistaObra() {
                     <td class="p-2 text-right font-mono text-blue-600 font-bold">${s.cantidad} ${s.Producto.unidad}</td>
                 </tr>`).join('')}</tbody>
                </table>`
-            : '<p class="text-slate-400 text-sm mb-4 italic">Sin material ni herramientas actualmente en esta obra.</p>';
+            : '<p class="text-slate-400 text-sm mb-4 italic">Sin material actualmente en esta obra.</p>';
+
+        const tablaHerr = herramientas.length
+            ? `<h3 class="font-bold text-slate-700 mb-2">🔧 HERRAMIENTAS EN OBRA</h3>
+               <table class="w-full text-sm mb-6">
+                <thead><tr class="bg-slate-100 text-slate-500 text-xs">
+                    <th class="p-2 text-left">HERRAMIENTA</th>
+                    <th class="p-2 text-center">CATEGORÍA</th>
+                    <th class="p-2 text-center">NRO SERIE</th>
+                    <th class="p-2 text-center">ESTADO</th>
+                    <th class="p-2 text-left">OBS.</th>
+                </tr></thead>
+                <tbody>${herramientas.map(h => `
+                <tr class="border-b hover:bg-slate-50">
+                    <td class="p-2 font-bold">${h.Producto.nombre}</td>
+                    <td class="p-2 text-center text-xs">${catLabel[h.categoria] || h.categoria}</td>
+                    <td class="p-2 text-center font-mono text-xs font-bold text-blue-700">${h.nro_serie}</td>
+                    <td class="p-2 text-center"><span class="px-2 py-1 rounded-full text-xs ${estColor[h.estado] || ''}">${estLabel[h.estado] || h.estado}</span></td>
+                    <td class="p-2 text-xs text-slate-400">${h.observaciones || '-'}</td>
+                </tr>`).join('')}</tbody>
+               </table>`
+            : '<p class="text-slate-400 text-sm mb-4 italic">Sin herramientas actualmente en esta obra.</p>';
 
         const tablaMovs = movimientos.length
             ? `<h3 class="font-bold text-slate-700 mb-2">📋 HISTORIAL DE MOVIMIENTOS</h3>
                <table class="w-full text-sm">
                 <thead><tr class="bg-slate-100 text-slate-500 text-xs">
                     <th class="p-2 text-left">PRODUCTO</th>
+                    <th class="p-2 text-center">NRO SERIE</th>
                     <th class="p-2 text-center">MOVIMIENTO</th>
                     <th class="p-2 text-right">CANT.</th>
                     <th class="p-2 text-center">FECHA</th>
@@ -499,6 +546,7 @@ async function cargarVistaObra() {
                 <tbody>${movimientos.map(m => `
                 <tr class="border-b hover:bg-slate-50">
                     <td class="p-2 font-bold text-slate-700">${m.Producto.nombre}</td>
+                    <td class="p-2 text-center font-mono text-xs text-blue-700">${m.nro_serie || '-'}</td>
                     <td class="p-2 text-center text-xs">${iconMov[m.tipo] || m.tipo}</td>
                     <td class="p-2 text-right font-mono">${m.cantidad}</td>
                     <td class="p-2 text-center text-xs text-slate-500">${new Date(m.fecha).toLocaleDateString('es-AR')} ${new Date(m.fecha).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</td>
@@ -507,7 +555,7 @@ async function cargarVistaObra() {
                </table>`
             : '<p class="text-slate-400 text-sm italic">Sin movimientos registrados.</p>';
 
-        contenido.innerHTML = tablaStock + tablaMovs;
+        contenido.innerHTML = tablaStock + tablaHerr + tablaMovs;
     } catch (e) { contenido.innerHTML = '<p class="text-red-500 text-sm p-4">Error cargando datos.</p>'; }
 }
 
@@ -660,6 +708,7 @@ function cerrarModalHerr() {
 }
 
 async function guardarHerramienta() {
+    const categoria     = document.getElementById('herr-categoria').value;
     const productoNombre = document.getElementById('herr-producto').value.trim();
     const nro_serie      = document.getElementById('herr-serie').value.trim();
     const ubicacionId    = document.getElementById('herr-ubicacion').value;
@@ -669,7 +718,7 @@ async function guardarHerramienta() {
     const res = await fetch('/logistica/herramientas/ingresar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productoNombre, nro_serie, ubicacionId, observaciones, usuario: 'admin' })
+        body: JSON.stringify({ productoNombre, nro_serie, ubicacionId, observaciones, categoria, usuario: 'admin' })
     });
     const data = await res.json();
     if (data.error) return alert(data.error);
@@ -679,16 +728,16 @@ async function guardarHerramienta() {
 
 async function moverHerramienta(id, serie) {
     const opciones = ubicaciones.map(u => `<option value="${u.id}">${u.nombre}</option>`).join('');
-    const html = `<div class="space-y-2">
+    document.getElementById('modal-titulo').innerText = '🔧 Mover herramienta';
+    document.getElementById('modal-campos').innerHTML = `<div class="space-y-2">
         <p class="text-sm text-slate-500">Herramienta: <strong>${serie}</strong></p>
         <select id="herr-dest-ubic" class="w-full border p-2 rounded">
             <option value="">-- Seleccionar destino --</option>${opciones}
         </select>
     </div>`;
-    // Usar el modal existente simplificado
-    document.getElementById('modal-titulo').innerText = '🔧 Mover herramienta';
-    document.getElementById('modal-campos').innerHTML = html;
-    document.getElementById('modal-guardar').onclick = async () => {
+    // Reemplazar el botón guardar del modal por uno específico
+    const btnGuardar = document.getElementById('btn-guardar');
+    btnGuardar.onclick = async () => {
         const dest = document.getElementById('herr-dest-ubic').value;
         if (!dest) return alert('Seleccioná destino');
         const res = await fetch('/logistica/herramientas/mover', {
@@ -698,7 +747,7 @@ async function moverHerramienta(id, serie) {
         });
         const data = await res.json();
         if (data.error) return alert(data.error);
-        document.getElementById('modal').classList.add('hidden');
+        cerrarModal();
         cargarHerramientas();
     };
     document.getElementById('modal').classList.remove('hidden');
@@ -723,6 +772,12 @@ async function cambiarEstadoHerr(id, estado) {
     <div class="bg-white rounded-xl p-6 w-full max-w-md space-y-3 shadow-2xl">
         <h3 class="text-xl font-bold border-b pb-2 text-slate-800">🔧 Registrar Herramienta</h3>
         <div class="space-y-3">
+            <div><label class="text-xs font-bold text-slate-400">CATEGORÍA:</label>
+                <select id="herr-categoria" class="w-full border-2 p-2 rounded-lg">
+                    <option value="ELECTRICA">⚡ Herramienta Eléctrica</option>
+                    <option value="MAYOR">🔩 Herramienta Mayor</option>
+                </select>
+            </div>
             <div><label class="text-xs font-bold text-slate-400">PRODUCTO (ej: MARTILLO DEMOLEDOR INGCO):</label>
                 <input id="herr-producto" class="w-full border-2 p-2 rounded-lg" placeholder="Nombre del producto">
             </div>

@@ -40,6 +40,7 @@ const Movimiento = sequelize.define('Movimiento', {
 // Herramienta: instancia individual con número de serie (siempre RETORNABLE)
 const Herramienta = sequelize.define('Herramienta', {
     nro_serie:    { type: DataTypes.STRING,  allowNull: false, unique: true },
+    categoria:    { type: DataTypes.STRING,  defaultValue: 'ELECTRICA' }, // ELECTRICA | MAYOR
     estado:       { type: DataTypes.STRING,  defaultValue: 'DISPONIBLE' }, // DISPONIBLE | EN_OBRA | REPARACION | BAJA
     observaciones:{ type: DataTypes.STRING,  allowNull: true }
 }, { tableName: 'Herramientas', timestamps: false });

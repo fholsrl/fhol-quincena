@@ -501,6 +501,7 @@ function agregarHojaMovimientos(wb, nombre, movimientos, mapaUbic) {
 router.get('/herramientas', proteger, async (req, res) => {
     try {
         const lista = await Herramienta.findAll({
+            where: { estado: { [Op.ne]: 'BAJA' } },
             include: [
                 { model: Producto, where: { activo: true }, attributes: ['id','nombre'] },
                 { model: Ubicacion, attributes: ['id','nombre'], required: false }
@@ -514,10 +515,9 @@ router.get('/herramientas', proteger, async (req, res) => {
 // Registrar nueva herramienta (ingreso con nro de serie)
 router.post('/herramientas/ingresar', proteger, async (req, res) => {
     try {
-        const { productoNombre, nro_serie, ubicacionId, observaciones, usuario } = req.body;
+        const { productoNombre, nro_serie, ubicacionId, observaciones, categoria, usuario } = req.body;
         if (!productoNombre || !nro_serie || !ubicacionId) return res.status(400).json({ error: 'Faltan datos' });
 
-        // Buscar o crear el producto (tipo RETORNABLE)
         let producto = await Producto.findOne({ where: { nombre: productoNombre.toUpperCase() } });
         if (producto) {
             producto.activo = true;
@@ -527,12 +527,12 @@ router.post('/herramientas/ingresar', proteger, async (req, res) => {
             producto = await Producto.create({ nombre: productoNombre.toUpperCase(), tipo: 'RETORNABLE', activo: true });
         }
 
-        // Verificar que el nro de serie no exista
         const existe = await Herramienta.findOne({ where: { nro_serie } });
         if (existe) return res.status(400).json({ error: `El número de serie ${nro_serie} ya existe` });
 
         const herramienta = await Herramienta.create({
             nro_serie,
+            categoria: categoria || 'ELECTRICA',
             estado: 'DISPONIBLE',
             observaciones: observaciones || null,
             productoId: producto.id,
@@ -540,17 +540,25 @@ router.post('/herramientas/ingresar', proteger, async (req, res) => {
         });
 
         await Movimiento.create({
-            tipo: 'INGRESO',
-            cantidad: 1,
+            tipo: 'INGRESO', cantidad: 1,
             ubicacion_destino_id: ubicacionId,
-            usuario,
-            herramienta_id: herramienta.id,
-            nro_serie,
-            productoId: producto.id,
-            fecha: new Date()
+            usuario, herramienta_id: herramienta.id,
+            nro_serie, productoId: producto.id, fecha: new Date()
         });
 
         res.json({ success: true, herramienta });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Herramientas por ubicación (para stock por obra)
+router.get('/herramientas/ubicacion/:ubicacionId', proteger, async (req, res) => {
+    try {
+        const lista = await Herramienta.findAll({
+            where: { ubicacionId: req.params.ubicacionId, estado: { [Op.ne]: 'BAJA' } },
+            include: [{ model: Producto, attributes: ['nombre'] }],
+            order: [['categoria','ASC'],['nro_serie','ASC']]
+        });
+        res.json(lista);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
