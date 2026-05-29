@@ -34,9 +34,10 @@
 
     <!-- TABS -->
     <div class="flex flex-wrap gap-1 border-b border-slate-300">
-        <button onclick="tab('stock')"   id="tab-stock"   class="tab active-tab">📦 STOCK</button>
-        <button onclick="tab('obra')"    id="tab-obra"    class="tab">🏗️ POR OBRA</button>
-        <button onclick="tab('reporte')" id="tab-reporte" class="tab">📊 REPORTE GLOBAL</button>
+        <button onclick="tab('stock')"       id="tab-stock"       class="tab active-tab">📦 STOCK</button>
+        <button onclick="tab('herramientas')" id="tab-herramientas" class="tab">🔧 HERRAMIENTAS</button>
+        <button onclick="tab('obra')"         id="tab-obra"         class="tab">🏗️ POR OBRA</button>
+        <button onclick="tab('reporte')"      id="tab-reporte"      class="tab">📊 REPORTE GLOBAL</button>
     </div>
 
     <!-- PANEL: STOCK (incluye gestión de productos) -->
@@ -59,6 +60,38 @@
                     <th class="p-2 text-center">BAJA</th>
                 </tr></thead>
                 <tbody id="tabla-stock"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- PANEL: HERRAMIENTAS -->
+    <div id="panel-herramientas" class="panel hidden bg-white p-4 rounded-b-xl shadow-lg border border-t-0 border-slate-200">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="font-bold text-slate-700">HERRAMIENTAS POR NÚMERO DE SERIE</h2>
+            <button onclick="abrirModalHerramienta()" class="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-blue-700">+ REGISTRAR HERRAMIENTA</button>
+        </div>
+        <!-- Filtros -->
+        <div class="flex gap-2 mb-3 flex-wrap">
+            <select id="filtro-herr-estado" onchange="cargarHerramientas()" class="border p-1 rounded text-sm">
+                <option value="">Todos los estados</option>
+                <option value="DISPONIBLE">✅ Disponible</option>
+                <option value="EN_OBRA">🏗️ En obra</option>
+                <option value="REPARACION">🔨 En reparación</option>
+                <option value="BAJA">❌ De baja</option>
+            </select>
+            <input id="filtro-herr-nombre" oninput="cargarHerramientas()" placeholder="Buscar producto o nro serie..." class="border p-1 rounded text-sm flex-1">
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="bg-slate-100 text-slate-600 text-xs">
+                    <th class="p-2 text-left">PRODUCTO</th>
+                    <th class="p-2 text-center">NRO SERIE</th>
+                    <th class="p-2 text-center">ESTADO</th>
+                    <th class="p-2 text-center">UBICACIÓN</th>
+                    <th class="p-2 text-left">OBSERVACIONES</th>
+                    <th class="p-2 text-center">ACCIONES</th>
+                </tr></thead>
+                <tbody id="tabla-herramientas"></tbody>
             </table>
         </div>
     </div>
@@ -152,13 +185,14 @@ function poblarSelectObras() {
 
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 function tab(nombre) {
-    ['stock','obra','reporte'].forEach(t => {
+    ['stock','herramientas','obra','reporte'].forEach(t => {
         document.getElementById(`panel-${t}`).classList.add('hidden');
         document.getElementById(`tab-${t}`).classList.remove('active-tab');
     });
     document.getElementById(`panel-${nombre}`).classList.remove('hidden');
     document.getElementById(`tab-${nombre}`).classList.add('active-tab');
     if (nombre === 'reporte') cargarReporteGlobal();
+    if (nombre === 'herramientas') cargarHerramientas();
 }
 
 // ─── HELPERS DE SELECTS ───────────────────────────────────────────────────────
@@ -554,6 +588,161 @@ function descargarExcelObra() {
     if (!obraSeleccionadaId) return alert('Seleccionar una obra primero');
     window.location.href = `/logistica/excel/ubicacion/${obraSeleccionadaId}`;
 }
+
+// ─── HERRAMIENTAS ─────────────────────────────────────────────────────────────
+const estadoHerr = {
+    DISPONIBLE: { label: '✅ Disponible',    color: 'bg-green-100 text-green-700' },
+    EN_OBRA:    { label: '🏗️ En obra',       color: 'bg-blue-100 text-blue-700' },
+    REPARACION: { label: '🔨 En reparación', color: 'bg-yellow-100 text-yellow-700' },
+    BAJA:       { label: '❌ De baja',       color: 'bg-red-100 text-red-700' }
+};
+
+let todasHerramientas = [];
+
+async function cargarHerramientas() {
+    try {
+        const res = await fetch('/logistica/herramientas');
+        todasHerramientas = await res.json();
+        renderHerramientas();
+    } catch (e) { console.error('Error cargando herramientas', e); }
+}
+
+function renderHerramientas() {
+    const filtroEstado = document.getElementById('filtro-herr-estado').value;
+    const filtroBusq   = document.getElementById('filtro-herr-nombre').value.toLowerCase();
+    const tabla = document.getElementById('tabla-herramientas');
+
+    const filtradas = todasHerramientas.filter(h => {
+        const matchEstado = !filtroEstado || h.estado === filtroEstado;
+        const matchBusq   = !filtroBusq ||
+            h.Producto.nombre.toLowerCase().includes(filtroBusq) ||
+            h.nro_serie.toLowerCase().includes(filtroBusq);
+        return matchEstado && matchBusq;
+    });
+
+    if (!filtradas.length) {
+        tabla.innerHTML = '<tr><td colspan="6" class="text-center text-slate-400 p-4">Sin herramientas</td></tr>';
+        return;
+    }
+
+    tabla.innerHTML = filtradas.map(h => {
+        const est = estadoHerr[h.estado] || { label: h.estado, color: 'bg-slate-100 text-slate-600' };
+        const ubic = h.Ubicacion ? h.Ubicacion.nombre : '-';
+        return `<tr class="border-b hover:bg-slate-50">
+            <td class="p-2 font-bold text-slate-700">${h.Producto.nombre}</td>
+            <td class="p-2 text-center font-mono font-bold text-blue-700">${h.nro_serie}</td>
+            <td class="p-2 text-center"><span class="px-2 py-1 rounded-full text-xs font-bold ${est.color}">${est.label}</span></td>
+            <td class="p-2 text-center text-xs text-slate-500">${ubic}</td>
+            <td class="p-2 text-xs text-slate-400">${h.observaciones || '-'}</td>
+            <td class="p-2 text-center">
+                <div class="flex gap-1 justify-center flex-wrap">
+                    ${h.estado !== 'BAJA' ? `<button onclick="moverHerramienta(${h.id},'${h.nro_serie}')" class="bg-blue-600 text-white text-xs px-2 py-1 rounded hover:bg-blue-700">Mover</button>` : ''}
+                    ${h.estado === 'DISPONIBLE' ? `<button onclick="cambiarEstadoHerr(${h.id},'REPARACION')" class="bg-yellow-500 text-white text-xs px-2 py-1 rounded hover:bg-yellow-600">Reparación</button>` : ''}
+                    ${h.estado === 'REPARACION' ? `<button onclick="cambiarEstadoHerr(${h.id},'DISPONIBLE')" class="bg-green-600 text-white text-xs px-2 py-1 rounded hover:bg-green-700">Disponible</button>` : ''}
+                    ${h.estado !== 'BAJA' ? `<button onclick="cambiarEstadoHerr(${h.id},'BAJA')" class="bg-red-600 text-white text-xs px-2 py-1 rounded hover:bg-red-700">Baja</button>` : ''}
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function abrirModalHerramienta() {
+    document.getElementById('modal-herr').classList.remove('hidden');
+    // Poblar ubicaciones
+    const sel = document.getElementById('herr-ubicacion');
+    sel.innerHTML = '<option value="">-- Seleccionar ubicación --</option>' +
+        ubicaciones.map(u => `<option value="${u.id}">${u.nombre}</option>`).join('');
+}
+
+function cerrarModalHerr() {
+    document.getElementById('modal-herr').classList.add('hidden');
+    ['herr-producto','herr-serie','herr-obs'].forEach(id => document.getElementById(id).value = '');
+}
+
+async function guardarHerramienta() {
+    const productoNombre = document.getElementById('herr-producto').value.trim();
+    const nro_serie      = document.getElementById('herr-serie').value.trim();
+    const ubicacionId    = document.getElementById('herr-ubicacion').value;
+    const observaciones  = document.getElementById('herr-obs').value.trim();
+    if (!productoNombre || !nro_serie || !ubicacionId) return alert('Completá producto, número de serie y ubicación');
+
+    const res = await fetch('/logistica/herramientas/ingresar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productoNombre, nro_serie, ubicacionId, observaciones, usuario: 'admin' })
+    });
+    const data = await res.json();
+    if (data.error) return alert(data.error);
+    cerrarModalHerr();
+    cargarHerramientas();
+}
+
+async function moverHerramienta(id, serie) {
+    const opciones = ubicaciones.map(u => `<option value="${u.id}">${u.nombre}</option>`).join('');
+    const html = `<div class="space-y-2">
+        <p class="text-sm text-slate-500">Herramienta: <strong>${serie}</strong></p>
+        <select id="herr-dest-ubic" class="w-full border p-2 rounded">
+            <option value="">-- Seleccionar destino --</option>${opciones}
+        </select>
+    </div>`;
+    // Usar el modal existente simplificado
+    document.getElementById('modal-titulo').innerText = '🔧 Mover herramienta';
+    document.getElementById('modal-campos').innerHTML = html;
+    document.getElementById('modal-guardar').onclick = async () => {
+        const dest = document.getElementById('herr-dest-ubic').value;
+        if (!dest) return alert('Seleccioná destino');
+        const res = await fetch('/logistica/herramientas/mover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ herramientaId: id, ubicacionDestinoId: dest, usuario: 'admin' })
+        });
+        const data = await res.json();
+        if (data.error) return alert(data.error);
+        document.getElementById('modal').classList.add('hidden');
+        cargarHerramientas();
+    };
+    document.getElementById('modal').classList.remove('hidden');
+}
+
+async function cambiarEstadoHerr(id, estado) {
+    const labels = { REPARACION: 'enviar a reparación', DISPONIBLE: 'marcar como disponible', BAJA: 'dar de BAJA' };
+    if (!confirm(`¿Querés ${labels[estado]} esta herramienta?`)) return;
+    const res = await fetch('/logistica/herramientas/estado', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ herramientaId: id, estado, usuario: 'admin' })
+    });
+    const data = await res.json();
+    if (data.error) return alert(data.error);
+    cargarHerramientas();
+}
 </script>
+
+<!-- MODAL HERRAMIENTA -->
+<div id="modal-herr" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl p-6 w-full max-w-md space-y-3 shadow-2xl">
+        <h3 class="text-xl font-bold border-b pb-2 text-slate-800">🔧 Registrar Herramienta</h3>
+        <div class="space-y-3">
+            <div><label class="text-xs font-bold text-slate-400">PRODUCTO (ej: MARTILLO DEMOLEDOR INGCO):</label>
+                <input id="herr-producto" class="w-full border-2 p-2 rounded-lg" placeholder="Nombre del producto">
+            </div>
+            <div><label class="text-xs font-bold text-slate-400">NÚMERO DE SERIE:</label>
+                <input id="herr-serie" class="w-full border-2 p-2 rounded-lg font-mono" placeholder="Ej: SN-2024-001">
+            </div>
+            <div><label class="text-xs font-bold text-slate-400">UBICACIÓN ACTUAL:</label>
+                <select id="herr-ubicacion" class="w-full border-2 p-2 rounded-lg">
+                    <option value="">-- Seleccionar --</option>
+                </select>
+            </div>
+            <div><label class="text-xs font-bold text-slate-400">OBSERVACIONES (opcional):</label>
+                <input id="herr-obs" class="w-full border-2 p-2 rounded-lg" placeholder="Ej: Comprada en marzo 2026">
+            </div>
+        </div>
+        <div class="flex gap-2 pt-2">
+            <button onclick="guardarHerramienta()" class="flex-1 bg-blue-600 text-white font-bold py-2 rounded-lg hover:bg-blue-700">GUARDAR</button>
+            <button onclick="cerrarModalHerr()" class="flex-1 bg-slate-200 text-slate-700 font-bold py-2 rounded-lg hover:bg-slate-300">CANCELAR</button>
+        </div>
+    </div>
+</div>
 </body>
 </html>

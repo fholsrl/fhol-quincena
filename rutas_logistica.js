@@ -2,7 +2,7 @@ const express  = require('express');
 const router   = express.Router();
 const { Op }   = require('sequelize');
 const ExcelJS  = require('exceljs');
-const { Producto, Ubicacion, Stock, Movimiento } = require('./database_logistica');
+const { Producto, Ubicacion, Stock, Movimiento, Herramienta } = require('./database_logistica');
 const { Empleado } = require('./database');
 
 const proteger = (req, res, next) => {
@@ -494,5 +494,120 @@ function agregarHojaMovimientos(wb, nombre, movimientos, mapaUbic) {
         }
     });
 }
+
+// ─── HERRAMIENTAS ────────────────────────────────────────────────────────────
+
+// Listar todas las herramientas con producto y ubicación actual
+router.get('/herramientas', proteger, async (req, res) => {
+    try {
+        const lista = await Herramienta.findAll({
+            include: [
+                { model: Producto, where: { activo: true }, attributes: ['id','nombre'] },
+                { model: Ubicacion, attributes: ['id','nombre'], required: false }
+            ],
+            order: [[Producto,'nombre','ASC'],['nro_serie','ASC']]
+        });
+        res.json(lista);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Registrar nueva herramienta (ingreso con nro de serie)
+router.post('/herramientas/ingresar', proteger, async (req, res) => {
+    try {
+        const { productoNombre, nro_serie, ubicacionId, observaciones, usuario } = req.body;
+        if (!productoNombre || !nro_serie || !ubicacionId) return res.status(400).json({ error: 'Faltan datos' });
+
+        // Buscar o crear el producto (tipo RETORNABLE)
+        let producto = await Producto.findOne({ where: { nombre: productoNombre.toUpperCase() } });
+        if (producto) {
+            producto.activo = true;
+            producto.tipo = 'RETORNABLE';
+            await producto.save();
+        } else {
+            producto = await Producto.create({ nombre: productoNombre.toUpperCase(), tipo: 'RETORNABLE', activo: true });
+        }
+
+        // Verificar que el nro de serie no exista
+        const existe = await Herramienta.findOne({ where: { nro_serie } });
+        if (existe) return res.status(400).json({ error: `El número de serie ${nro_serie} ya existe` });
+
+        const herramienta = await Herramienta.create({
+            nro_serie,
+            estado: 'DISPONIBLE',
+            observaciones: observaciones || null,
+            productoId: producto.id,
+            ubicacionId
+        });
+
+        await Movimiento.create({
+            tipo: 'INGRESO',
+            cantidad: 1,
+            ubicacion_destino_id: ubicacionId,
+            usuario,
+            herramienta_id: herramienta.id,
+            nro_serie,
+            productoId: producto.id,
+            fecha: new Date()
+        });
+
+        res.json({ success: true, herramienta });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Mover herramienta a otra ubicación
+router.post('/herramientas/mover', proteger, async (req, res) => {
+    try {
+        const { herramientaId, ubicacionDestinoId, usuario } = req.body;
+        const herramienta = await Herramienta.findByPk(herramientaId, { include: [Ubicacion] });
+        if (!herramienta) return res.status(404).json({ error: 'Herramienta no encontrada' });
+
+        const destino = await Ubicacion.findByPk(ubicacionDestinoId);
+        const nuevoEstado = destino.tipo_ubicacion === 'OBRA' ? 'EN_OBRA' : 'DISPONIBLE';
+
+        await Movimiento.create({
+            tipo: 'TRASLADO',
+            cantidad: 1,
+            ubicacion_origen_id: herramienta.ubicacionId,
+            ubicacion_destino_id: ubicacionDestinoId,
+            usuario,
+            herramienta_id: herramienta.id,
+            nro_serie: herramienta.nro_serie,
+            productoId: herramienta.productoId,
+            fecha: new Date()
+        });
+
+        herramienta.ubicacionId = ubicacionDestinoId;
+        herramienta.estado = nuevoEstado;
+        await herramienta.save();
+
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Cambiar estado de herramienta (REPARACION, BAJA, DISPONIBLE)
+router.post('/herramientas/estado', proteger, async (req, res) => {
+    try {
+        const { herramientaId, estado, observaciones, usuario } = req.body;
+        const herramienta = await Herramienta.findByPk(herramientaId);
+        if (!herramienta) return res.status(404).json({ error: 'No encontrada' });
+
+        herramienta.estado = estado;
+        if (observaciones !== undefined) herramienta.observaciones = observaciones;
+        await herramienta.save();
+
+        await Movimiento.create({
+            tipo: estado === 'BAJA' ? 'BAJA' : 'CAMBIO_ESTADO',
+            cantidad: 1,
+            ubicacion_origen_id: herramienta.ubicacionId,
+            usuario,
+            herramienta_id: herramienta.id,
+            nro_serie: herramienta.nro_serie,
+            productoId: herramienta.productoId,
+            fecha: new Date()
+        });
+
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 module.exports = router;
