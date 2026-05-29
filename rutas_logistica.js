@@ -553,7 +553,6 @@ router.get('/herramientas/resumen', proteger, async (req, res) => {
                 { model: Ubicacion, attributes: ['id','nombre'], required: false }
             ]
         });
-
         // Agrupar por producto
         const grupos = {};
         lista.forEach(h => {
@@ -586,7 +585,7 @@ router.get('/herramientas', proteger, async (req, res) => {
         const lista = await Herramienta.findAll({
             where: { estado: { [Op.ne]: 'BAJA' } },
             include: [
-                { model: Producto, where: { activo: true }, attributes: ['id','nombre'] },
+                { model: Producto, attributes: ['id','nombre'] },
                 { model: Ubicacion, attributes: ['id','nombre'], required: false }
             ],
             order: [[Producto,'nombre','ASC'],['nro_serie','ASC']]
@@ -652,8 +651,7 @@ router.get('/herramientas/ubicacion/:ubicacionId', proteger, async (req, res) =>
             where: { ubicacionId: req.params.ubicacionId, estado: { [Op.ne]: 'BAJA' } },
             include: [{ model: Producto, attributes: ['nombre'] }],
             order: [['categoria','ASC'],['nro_serie','ASC']]
-        });
-        res.json(lista);
+        });        res.json(lista);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
