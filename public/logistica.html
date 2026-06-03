@@ -136,6 +136,13 @@
 </style>
 
 <script>
+function editarStockBtn(btn) {
+    editarStock(btn.dataset.pid, btn.dataset.nombre, btn.dataset.ubic, btn.dataset.cant);
+}
+function darBajaBtn(btn) {
+    darBaja(btn.dataset.pid, btn.dataset.nombre);
+}
+
 async function editarStock(productoId, nombreActual, ubicacionId, cantidadActual) {
     document.getElementById('edit-nombre').value = nombreActual;
     document.getElementById('edit-cantidad').value = cantidadActual;
@@ -475,9 +482,15 @@ async function cargarEstado() {
                 <td class="p-2 text-right font-mono font-bold text-blue-600">${actual} ${item.Producto.unidad}</td>
                 <td class="p-2 text-center"><span class="px-2 py-1 rounded-full text-xs ${color}">${estado}</span></td>
                 <td class="p-2 text-center">
-                    <button onclick="editarStock(${item.Producto.id},'${item.Producto.nombre.replace(/'/g,"\\'")}',${item.ubicacionId},${actual})"
+                    <button onclick="editarStockBtn(this)"
+                        data-pid="${item.Producto.id}"
+                        data-nombre="${item.Producto.nombre.replace(/"/g,'&quot;')}"
+                        data-ubic="${item.ubicacionId || item.UbicacionId}"
+                        data-cant="${actual}"
                         class="bg-blue-100 text-blue-600 text-xs font-bold px-2 py-1 rounded-lg hover:bg-blue-200 mr-1">✏️</button>
-                    <button onclick="darBaja(${item.Producto.id},'${item.Producto.nombre.replace(/'/g,"\\'")}')""
+                    <button onclick="darBajaBtn(this)"
+                        data-pid="${item.Producto.id}"
+                        data-nombre="${item.Producto.nombre.replace(/"/g,'&quot;')}"
                         class="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded-lg hover:bg-red-200">BAJA</button>
                 </td>
             </tr>`;
