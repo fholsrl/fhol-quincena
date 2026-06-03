@@ -136,6 +136,27 @@
 </style>
 
 <script>
+async function editarStock(productoId, nombreActual, ubicacionId, cantidadActual) {
+    document.getElementById('edit-nombre').value = nombreActual;
+    document.getElementById('edit-cantidad').value = cantidadActual;
+    document.getElementById('modal-editar-stock').classList.remove('hidden');
+    document.getElementById('btn-guardar-edicion').onclick = async () => {
+        const nuevoNombre   = document.getElementById('edit-nombre').value.trim();
+        const nuevaCantidad = document.getElementById('edit-cantidad').value;
+        if (!nuevoNombre) return alert('El nombre no puede estar vacío');
+        const res = await fetch('/logistica/stock/editar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productoId, ubicacionId, nuevoNombre, nuevaCantidad })
+        });
+        const data = await res.json();
+        if (data.error) return alert(data.error);
+        document.getElementById('modal-editar-stock').classList.add('hidden');
+        await cargarEstado();
+        await recargarBase();
+    };
+}
+
 async function editarNombreProducto(productoId, nombreActual) {
     const nuevoNombre = prompt(`Editar nombre del producto:\n\nActual: ${nombreActual}\n\nNuevo nombre:`, nombreActual);
     if (!nuevoNombre || nuevoNombre.trim() === nombreActual) return;
@@ -454,7 +475,7 @@ async function cargarEstado() {
                 <td class="p-2 text-right font-mono font-bold text-blue-600">${actual} ${item.Producto.unidad}</td>
                 <td class="p-2 text-center"><span class="px-2 py-1 rounded-full text-xs ${color}">${estado}</span></td>
                 <td class="p-2 text-center">
-                    <button onclick="editarNombreProducto(${item.Producto.id},'${item.Producto.nombre.replace(/'/g,"\\'")}')""
+                    <button onclick="editarStock(${item.Producto.id},'${item.Producto.nombre.replace(/'/g,"\\'")}',${item.ubicacionId},${actual})"
                         class="bg-blue-100 text-blue-600 text-xs font-bold px-2 py-1 rounded-lg hover:bg-blue-200 mr-1">✏️</button>
                     <button onclick="darBaja(${item.Producto.id},'${item.Producto.nombre.replace(/'/g,"\\'")}')""
                         class="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded-lg hover:bg-red-200">BAJA</button>
@@ -814,6 +835,28 @@ async function cambiarEstadoHerr(id, estado) {
     cargarHerramientas();
 }
 </script>
+
+<!-- MODAL EDITAR STOCK -->
+<div id="modal-editar-stock" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl p-6 w-full max-w-md space-y-3 shadow-2xl">
+        <h3 class="text-xl font-bold border-b pb-2 text-slate-800">✏️ Editar Stock</h3>
+        <div class="space-y-3">
+            <div>
+                <label class="text-xs font-bold text-slate-400">NOMBRE DEL PRODUCTO:</label>
+                <input id="edit-nombre" class="w-full border-2 p-2 rounded-lg uppercase mt-1" placeholder="Nombre">
+            </div>
+            <div>
+                <label class="text-xs font-bold text-slate-400">CANTIDAD ACTUAL:</label>
+                <input id="edit-cantidad" type="number" step="1" class="w-full border-2 p-2 rounded-lg mt-1" placeholder="Cantidad">
+                <p class="text-xs text-slate-400 mt-1">⚠️ Esto reemplaza la cantidad actual. Usalo solo para corregir errores.</p>
+            </div>
+        </div>
+        <div class="flex gap-2 pt-2">
+            <button id="btn-guardar-edicion" class="flex-1 bg-blue-600 text-white font-bold py-2 rounded-lg hover:bg-blue-700">GUARDAR</button>
+            <button onclick="document.getElementById('modal-editar-stock').classList.add('hidden')" class="flex-1 bg-slate-200 text-slate-700 font-bold py-2 rounded-lg hover:bg-slate-300">CANCELAR</button>
+        </div>
+    </div>
+</div>
 
 <!-- MODAL HERRAMIENTA -->
 <div id="modal-herr" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">

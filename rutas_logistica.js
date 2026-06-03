@@ -34,12 +34,15 @@ async function moverStock(productoId, origenId, destinoId, cantidad) {
     origen.cantidad = parseFloat(origen.cantidad) - parseFloat(cantidad);
     await origen.save();
 
-    const [destino] = await Stock.findOrCreate({
+    const [destino, creado] = await Stock.findOrCreate({
         where: { productoId, ubicacionId: destinoId },
-        defaults: { cantidad: 0, stock_inicial: 0 }
+        defaults: { cantidad: parseFloat(cantidad), stock_inicial: parseFloat(cantidad) }
     });
-    destino.cantidad = parseFloat(destino.cantidad) + parseFloat(cantidad);
-    await destino.save();
+    if (!creado) {
+        destino.cantidad      = parseFloat(destino.cantidad) + parseFloat(cantidad);
+        destino.stock_inicial = parseFloat(destino.stock_inicial) + parseFloat(cantidad);
+        await destino.save();
+    }
 }
 
 // ─── UBICACIONES ─────────────────────────────────────────────────────────────
@@ -496,6 +499,38 @@ function agregarHojaMovimientos(wb, nombre, movimientos, mapaUbic) {
 }
 
 // ─── HERRAMIENTAS ────────────────────────────────────────────────────────────
+
+// Editar stock: nombre del producto y/o cantidad en una ubicación
+router.post('/stock/editar', proteger, async (req, res) => {
+    try {
+        const { productoId, ubicacionId, nuevoNombre, nuevaCantidad } = req.body;
+
+        // Renombrar si corresponde
+        if (nuevoNombre && nuevoNombre.trim()) {
+            const nombreFinal = nuevoNombre.trim().toUpperCase();
+            const existente = await Producto.findOne({ where: { nombre: nombreFinal } });
+            if (existente && existente.id !== parseInt(productoId)) {
+                // Fusionar
+                await Stock.update({ productoId: existente.id }, { where: { productoId, ubicacionId } });
+                await Movimiento.update({ productoId: existente.id }, { where: { productoId } });
+            } else {
+                await Producto.update({ nombre: nombreFinal }, { where: { id: productoId } });
+            }
+        }
+
+        // Actualizar cantidad si corresponde
+        if (nuevaCantidad !== undefined && nuevaCantidad !== '') {
+            const cant = parseFloat(nuevaCantidad);
+            if (isNaN(cant) || cant < 0) return res.status(400).json({ error: 'Cantidad inválida' });
+            await Stock.update(
+                { cantidad: cant, stock_inicial: cant },
+                { where: { productoId, ubicacionId } }
+            );
+        }
+
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // Renombrar o fusionar producto
 router.post('/productos/renombrar', proteger, async (req, res) => {
