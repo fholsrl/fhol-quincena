@@ -25,9 +25,10 @@ const Empleado = sequelize.define('Empleado', {
 });
 
 const Hora = sequelize.define('Hora', {
-    fecha: { type: DataTypes.DATEONLY, allowNull: false },
+    fecha:         { type: DataTypes.DATEONLY, allowNull: false },
     cantidadHoras: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
-    cargadoPor: { type: DataTypes.STRING }
+    cargadoPor:    { type: DataTypes.STRING },
+    estado:        { type: DataTypes.STRING, defaultValue: 'NORMAL' } // NORMAL | ENFERMO | LLUVIA
 });
 
 Empleado.hasMany(Hora);

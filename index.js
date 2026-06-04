@@ -68,35 +68,42 @@ app.post('/empleados', proteger, async (req, res) => { // Agregué "proteger" po
     } catch (e) { res.status(500).send(e.message); }
 });
 
+// Cambiar obra de un empleado
+app.post('/empleados/cambiar-obra', proteger, async (req, res) => {
+    try {
+        const { id, obra } = req.body;
+        await Empleado.update({ obra }, { where: { id } });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
 app.post('/cargar-horas', proteger, async (req, res) => {
     try {
-        let { empleadoId, fecha, cantidadHoras } = req.body;
-        
-        // 1. LIMPIEZA DE DECIMALES: Convertimos coma en punto antes de procesar
-        if (typeof cantidadHoras === 'string') {
-            cantidadHoras = cantidadHoras.replace(',', '.');
+        let { empleadoId, fecha, cantidadHoras, estado } = req.body;
+
+        const estadoFinal = estado || 'NORMAL';
+        let valorNumerico = 0;
+        if (estadoFinal === 'NORMAL') {
+            if (typeof cantidadHoras === 'string') cantidadHoras = cantidadHoras.replace(',', '.');
+            valorNumerico = parseFloat(cantidadHoras) || 0;
         }
-        const valorNumerico = parseFloat(cantidadHoras) || 0;
 
         const usuarioActual = (req.session.user && req.session.user.username) ? req.session.user.username : 'admin';
 
-        // 2. BUSCAR O CREAR
         const [registro, creado] = await Hora.findOrCreate({
             where: { EmpleadoId: empleadoId, fecha: fecha },
-            defaults: { 
-                cantidadHoras: valorNumerico,
-                cargadoPor: usuarioActual 
-            }
+            defaults: { cantidadHoras: valorNumerico, cargadoPor: usuarioActual, estado: estadoFinal }
         });
 
-        // 3. ACTUALIZACIÓN FORZADA: Si ya existía, actualizamos el valor sí o sí
         if (!creado) {
             registro.cantidadHoras = valorNumerico;
-            registro.cargadoPor = usuarioActual;
+            registro.cargadoPor    = usuarioActual;
+            registro.estado        = estadoFinal;
             await registro.save();
         }
 
-        // 4. RESPUESTA CLARA: Devolvemos el registro para que el frontend confirme
         res.json({ success: true, data: registro });
 
     } catch (e) { 
@@ -170,7 +177,7 @@ app.get('/consultar-horas', async (req, res) => {
         const registro = await Hora.findOne({
             where: { EmpleadoId: empleadoId, fecha: fecha }
         });
-        res.json(registro || { cantidadHoras: 0 }); // Si no hay nada, devuelve 0
+        res.json(registro || { cantidadHoras: 0, estado: 'NORMAL' });
     } catch (e) { res.status(500).send(e.message); }
 });
 
@@ -276,20 +283,37 @@ app.get('/descargar-excel', async (req, res) => {
             let sumaHoras = 0;
             diasRango.forEach(dia => {
                 const registro = emp.Horas.find(h => h.fecha === dia.fechaStr);
-                const hs = registro ? parseFloat(registro.cantidadHoras) : 0;
-                rowData[dia.fechaStr] = hs > 0 ? hs : '-';
-                sumaHoras += hs;
+                if (registro) {
+                    const est = registro.estado || 'NORMAL';
+                    if (est === 'ENFERMO') {
+                        rowData[dia.fechaStr] = 'E';
+                    } else if (est === 'LLUVIA') {
+                        rowData[dia.fechaStr] = 'LL';
+                    } else {
+                        const hs = parseFloat(registro.cantidadHoras) || 0;
+                        rowData[dia.fechaStr] = hs > 0 ? hs : '-';
+                        sumaHoras += hs;
+                    }
+                } else {
+                    rowData[dia.fechaStr] = '-';
+                }
             });
             rowData['total'] = sumaHoras;
-            
+
             const row = worksheet.addRow(rowData);
             row.eachCell((cell, colNumber) => {
-                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                cell.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
                 cell.alignment = { horizontal: 'center' };
-                // Colorear el fondo de las celdas de finde en el cuerpo
                 if (colNumber > 2 && colNumber < colsConfig.length) {
-                    if (diasRango[colNumber - 3].esEspecial) {
-                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+                    const dia = diasRango[colNumber - 3];
+                    if (dia.esEspecial) {
+                        cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFEE2E2' } };
+                    } else if (cell.value === 'E') {
+                        cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFEF9C3' } }; // amarillo enfermo
+                        cell.font = { bold: true, color: { argb:'FFB45309' } };
+                    } else if (cell.value === 'LL') {
+                        cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFE0F2FE' } }; // celeste lluvia
+                        cell.font = { bold: true, color: { argb:'FF0369A1' } };
                     }
                 }
             });

@@ -197,12 +197,19 @@ async function refresh() {
                 body.innerHTML += `
                 <tr class="border-b hover:bg-slate-50 fila-empleado" data-obra="${e.obra || ''}">
                     <td class="p-3 font-bold">${e.apellido.toUpperCase()}, ${e.nombre}</td>
-                    <td class="p-3 text-sm text-slate-500">${e.obra || '-'}</td>
+                    <td class="p-3 text-sm text-slate-500">
+                        <span id="obra-txt-${e.id}">${e.obra || '-'}</span>
+                        <button onclick="editarObra(${e.id})" class="ml-1 text-slate-400 hover:text-blue-500 text-xs">✏️</button>
+                    </td>
                     <td class="p-3">
                         <input type="date" id="f-${e.id}" value="${hoy}" onchange="buscarHoras(${e.id})" class="border p-1 rounded w-full text-sm">
                     </td>
                     <td class="p-3">
-                        <input type="number" id="h-${e.id}" placeholder="0" step="0.5" oninput="autoguardar(${e.id})" class="border-2 p-1 w-full rounded text-center font-bold focus:border-blue-500 outline-none">
+                        <div class="flex gap-1 items-center">
+                            <input type="number" id="h-${e.id}" placeholder="0" step="0.5" oninput="autoguardar(${e.id},'NORMAL')" class="border-2 p-1 w-full rounded text-center font-bold focus:border-blue-500 outline-none">
+                            <button id="btn-e-${e.id}" onclick="marcarEstado(${e.id},'ENFERMO')" title="Enfermo" class="px-2 py-1 rounded text-xs font-bold border-2 border-yellow-400 text-yellow-600 hover:bg-yellow-50">E</button>
+                            <button id="btn-ll-${e.id}" onclick="marcarEstado(${e.id},'LLUVIA')" title="Lluvia" class="px-2 py-1 rounded text-xs font-bold border-2 border-blue-400 text-blue-600 hover:bg-blue-50">LL</button>
+                        </div>
                     </td>
                     <td class="p-3 text-center">
                         <div class="flex flex-col items-center gap-1">
@@ -241,10 +248,28 @@ async function buscarHoras(id) {
     try {
         const res = await fetch(`/consultar-horas?empleadoId=${id}&fecha=${fInput.value}`);
         const data = await res.json();
+        const estado = data.estado || 'NORMAL';
 
-        // Si hay horas, las ponemos. Si no, limpiamos el campo.
-        hInput.value = (data && data.cantidadHoras > 0) ? data.cantidadHoras : "";
-        
+        // Resetear botones
+        document.getElementById(`btn-e-${id}`)?.classList.remove('bg-yellow-100','border-yellow-600');
+        document.getElementById(`btn-ll-${id}`)?.classList.remove('bg-blue-100','border-blue-600');
+
+        if (estado === 'ENFERMO') {
+            hInput.value = '';
+            hInput.placeholder = 'E';
+            hInput.classList.add('bg-yellow-50');
+            document.getElementById(`btn-e-${id}`)?.classList.add('bg-yellow-100','border-yellow-600');
+        } else if (estado === 'LLUVIA') {
+            hInput.value = '';
+            hInput.placeholder = 'LL';
+            hInput.classList.add('bg-blue-50');
+            document.getElementById(`btn-ll-${id}`)?.classList.add('bg-blue-100','border-blue-600');
+        } else {
+            hInput.classList.remove('bg-yellow-50','bg-blue-50');
+            hInput.placeholder = '0';
+            hInput.value = (data && data.cantidadHoras > 0) ? data.cantidadHoras : '';
+        }
+
         st.innerText = "LISTO";
         st.className = "text-[10px] text-slate-400 uppercase";
         st.classList.remove('animate-pulse');
@@ -322,25 +347,122 @@ async function cargarUsuarios() {
 }
 
 let timer;
-function autoguardar(id) {
+function autoguardar(id, estado = 'NORMAL') {
     clearTimeout(timer);
     const status = document.getElementById(`status-${id}`);
     status.innerText = "ESCRIBIENDO...";
-    
+    const hInput = document.getElementById(`h-${id}`);
+
+    // Si el estado es NORMAL, limpiar colores especiales
+    if (estado === 'NORMAL') {
+        hInput.classList.remove('bg-yellow-50','bg-blue-50');
+        hInput.placeholder = '0';
+        document.getElementById(`btn-e-${id}`)?.classList.remove('bg-yellow-100','border-yellow-600');
+        document.getElementById(`btn-ll-${id}`)?.classList.remove('bg-blue-100','border-blue-600');
+    }
+
     timer = setTimeout(async () => {
         const fecha = document.getElementById(`f-${id}`).value;
-        const cantidadHoras = document.getElementById(`h-${id}`).value;
+        const cantidadHoras = hInput.value;
         status.innerText = "GUARDANDO...";
-        
         await fetch('/cargar-horas', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ empleadoId: id, fecha, cantidadHoras: cantidadHoras || 0 })
+            body: JSON.stringify({ empleadoId: id, fecha, cantidadHoras: cantidadHoras || 0, estado })
         });
-        
         status.innerText = "✅ GUARDADO";
         setTimeout(() => status.innerText = "LISTO", 1500);
     }, 800);
+}
+
+async function marcarEstado(id, estado) {
+    const fecha = document.getElementById(`f-${id}`).value;
+    const hInput = document.getElementById(`h-${id}`);
+    const status = document.getElementById(`status-${id}`);
+
+    // Toggle: si ya estaba ese estado, volver a NORMAL
+    const btnE  = document.getElementById(`btn-e-${id}`);
+    const btnLL = document.getElementById(`btn-ll-${id}`);
+    const yaActivo = (estado === 'ENFERMO' && btnE?.classList.contains('bg-yellow-100')) ||
+                     (estado === 'LLUVIA'  && btnLL?.classList.contains('bg-blue-100'));
+
+    if (yaActivo) {
+        autoguardar(id, 'NORMAL');
+        return;
+    }
+
+    // Marcar visualmente
+    hInput.value = '';
+    hInput.classList.remove('bg-yellow-50','bg-blue-50');
+    btnE?.classList.remove('bg-yellow-100','border-yellow-600');
+    btnLL?.classList.remove('bg-blue-100','border-blue-600');
+
+    if (estado === 'ENFERMO') {
+        hInput.placeholder = 'E';
+        hInput.classList.add('bg-yellow-50');
+        btnE?.classList.add('bg-yellow-100','border-yellow-600');
+    } else {
+        hInput.placeholder = 'LL';
+        hInput.classList.add('bg-blue-50');
+        btnLL?.classList.add('bg-blue-100','border-blue-600');
+    }
+
+    status.innerText = "GUARDANDO...";
+    await fetch('/cargar-horas', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ empleadoId: id, fecha, cantidadHoras: 0, estado })
+    });
+    status.innerText = "✅ GUARDADO";
+    setTimeout(() => status.innerText = "LISTO", 1500);
+}
+
+async function editarObra(id) {
+    const obraActual = document.getElementById(`obra-txt-${id}`)?.innerText || '';
+    // Obtener obras existentes de los empleados
+    const obras = [...new Set(Array.from(document.querySelectorAll('.fila-empleado'))
+        .map(f => f.getAttribute('data-obra')).filter(o => o && o !== '-'))].sort();
+
+    // Construir modal inline
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="bg-white rounded-xl p-6 w-full max-w-sm shadow-2xl space-y-4">
+            <h3 class="font-bold text-slate-800 text-lg border-b pb-2">✏️ Cambiar Obra</h3>
+            <select id="modal-obra-sel" onchange="toggleNuevaObra()" class="w-full border-2 p-2 rounded-lg text-sm">
+                <option value="">-- Seleccionar obra --</option>
+                ${obras.map(o => `<option value="${o}" ${o === obraActual ? 'selected' : ''}>${o}</option>`).join('')}
+                <option value="__nueva__">➕ Nueva obra</option>
+            </select>
+            <input id="modal-obra-input" placeholder="Nombre de la nueva obra" class="w-full border-2 p-2 rounded-lg text-sm hidden">
+            <div class="flex gap-2">
+                <button id="modal-obra-ok" class="flex-1 bg-blue-600 text-white font-bold py-2 rounded-lg hover:bg-blue-700">GUARDAR</button>
+                <button onclick="this.closest('.fixed').remove()" class="flex-1 bg-slate-200 text-slate-700 font-bold py-2 rounded-lg hover:bg-slate-300">CANCELAR</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+
+    document.getElementById('modal-obra-ok').onclick = async () => {
+        const sel = document.getElementById('modal-obra-sel').value;
+        const nuevaObra = sel === '__nueva__'
+            ? document.getElementById('modal-obra-input').value.trim()
+            : sel;
+        if (!nuevaObra) return alert('Seleccioná o escribí una obra');
+        const res = await fetch('/empleados/cambiar-obra', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ id, obra: nuevaObra })
+        });
+        const data = await res.json();
+        if (data.success) { modal.remove(); await refresh(); }
+    };
+}
+
+function toggleNuevaObra() {
+    const sel = document.getElementById('modal-obra-sel').value;
+    const inp = document.getElementById('modal-obra-input');
+    if (sel === '__nueva__') { inp.classList.remove('hidden'); inp.focus(); }
+    else inp.classList.add('hidden');
 }
 
 async function alta() {
