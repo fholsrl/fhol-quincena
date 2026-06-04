@@ -206,9 +206,9 @@ async function refresh() {
                     </td>
                     <td class="p-3">
                         <div class="flex gap-1 items-center">
-                            <input type="number" id="h-${e.id}" placeholder="0" step="0.5" oninput="autoguardar(${e.id},'NORMAL')" class="border-2 p-1 w-full rounded text-center font-bold focus:border-blue-500 outline-none">
-                            <button id="btn-e-${e.id}" onclick="marcarEstado(${e.id},'ENFERMO')" title="Enfermo" class="px-2 py-1 rounded text-xs font-bold border-2 border-yellow-400 text-yellow-600 hover:bg-yellow-50">E</button>
-                            <button id="btn-ll-${e.id}" onclick="marcarEstado(${e.id},'LLUVIA')" title="Lluvia" class="px-2 py-1 rounded text-xs font-bold border-2 border-blue-400 text-blue-600 hover:bg-blue-50">LL</button>
+                            <input type="number" id="h-${e.id}" placeholder="0" step="0.5" oninput="autoguardar(${e.id},'NORMAL')" class="border-2 p-1 rounded text-center font-bold focus:border-blue-500 outline-none" style="width:70px;min-width:70px">
+                            <button id="btn-e-${e.id}" onclick="marcarEstado(${e.id},'ENFERMO')" title="Enfermo" class="px-2 py-1 rounded text-xs font-bold border-2 border-yellow-400 text-yellow-600 hover:bg-yellow-50 flex-shrink-0">E</button>
+                            <button id="btn-ll-${e.id}" onclick="marcarEstado(${e.id},'LLUVIA')" title="Lluvia" class="px-2 py-1 rounded text-xs font-bold border-2 border-blue-400 text-blue-600 hover:bg-blue-50 flex-shrink-0">LL</button>
                         </div>
                     </td>
                     <td class="p-3 text-center">
