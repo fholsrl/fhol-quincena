@@ -317,6 +317,83 @@ router.get('/excel/ubicacion/:ubicacionId', proteger, async (req, res) => {
 
 // ─── EXCEL: GENERAL (todas las ubicaciones) ───────────────────────────────────
 
+router.get('/excel/herramientas', proteger, async (req, res) => {
+    try {
+        const { estado, ubicacion } = req.query;
+        const where = { estado: { [Op.ne]: 'BAJA' } };
+        if (estado) where.estado = estado;
+
+        const lista = await Herramienta.findAll({
+            where,
+            include: [
+                { model: Producto, attributes: ['nombre'] },
+                { model: Ubicacion, attributes: ['nombre'], required: false }
+            ],
+            order: [[Producto,'nombre','ASC'],['nro_serie','ASC']]
+        });
+
+        const filtrada = ubicacion
+            ? lista.filter(h => h.Ubicacion && h.Ubicacion.nombre === ubicacion)
+            : lista;
+
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet('Herramientas');
+
+        ws.columns = [
+            { header: 'PRODUCTO',    key: 'producto',  width: 35 },
+            { header: 'CATEGORÍA',   key: 'categoria', width: 18 },
+            { header: 'NRO SERIE',   key: 'nro_serie', width: 15 },
+            { header: 'ESTADO',      key: 'estado',    width: 15 },
+            { header: 'UBICACIÓN',   key: 'ubicacion', width: 20 },
+            { header: 'OBSERVACIONES', key: 'obs',     width: 30 },
+        ];
+
+        // Título
+        ws.insertRow(1, []);
+        ws.mergeCells(1, 1, 1, 6);
+        const titulo = ws.getCell('A1');
+        const filtroTxt = ubicacion ? ` - ${ubicacion}` : '';
+        titulo.value = `LISTADO DE HERRAMIENTAS${filtroTxt}`;
+        titulo.font = { name: 'Arial Black', size: 14, color: { argb: 'FF1E3A8A' } };
+        titulo.alignment = { horizontal: 'center', vertical: 'middle' };
+        ws.getRow(1).height = 36;
+
+        // Headers
+        const hRow = ws.getRow(2);
+        hRow.height = 24;
+        hRow.eachCell(cell => estiloHeader(cell, 'FF1E3A8A'));
+
+        const catLabel = { ELECTRICA: 'Eléctrica', MAYOR: 'Mayor' };
+        const estLabel = { DISPONIBLE: 'Disponible', EN_OBRA: 'En obra', REPARACION: 'En reparación' };
+        const estColor = { DISPONIBLE: 'FF059669', EN_OBRA: 'FF2563EB', REPARACION: 'FFD97706' };
+
+        filtrada.forEach(h => {
+            const r = ws.addRow({
+                producto:  h.Producto ? h.Producto.nombre : '-',
+                categoria: catLabel[h.categoria] || h.categoria,
+                nro_serie: h.nro_serie,
+                estado:    estLabel[h.estado] || h.estado,
+                ubicacion: h.Ubicacion ? h.Ubicacion.nombre : '-',
+                obs:       h.observaciones || '-'
+            });
+            r.eachCell((cell, col) => {
+                cell.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
+                cell.alignment = { horizontal: 'center' };
+                if (col === 1) cell.alignment = { horizontal: 'left' };
+                if (col === 4) {
+                    const color = estColor[h.estado];
+                    if (color) cell.font = { bold: true, color: { argb: 'FF' + color.slice(2) } };
+                }
+            });
+        });
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=HERRAMIENTAS_FHOL.xlsx`);
+        await wb.xlsx.write(res);
+        res.end();
+    } catch (e) { res.status(500).send('Error: ' + e.message); }
+});
+
 router.get('/excel/general', proteger, async (req, res) => {
     try {
         const stock = await Stock.findAll({
@@ -687,6 +764,35 @@ router.get('/herramientas/ubicacion/:ubicacionId', proteger, async (req, res) =>
             include: [{ model: Producto, attributes: ['nombre'] }],
             order: [['categoria','ASC'],['nro_serie','ASC']]
         });        res.json(lista);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Editar nombre y/o número de serie de una herramienta
+router.post('/herramientas/editar', proteger, async (req, res) => {
+    try {
+        const { herramientaId, nuevoNombre, nuevoSerie } = req.body;
+        const herramienta = await Herramienta.findByPk(herramientaId);
+        if (!herramienta) return res.status(404).json({ error: 'No encontrada' });
+
+        // Verificar que el nuevo nro de serie no exista en otra herramienta
+        if (nuevoSerie !== herramienta.nro_serie) {
+            const existe = await Herramienta.findOne({ where: { nro_serie: nuevoSerie } });
+            if (existe) return res.status(400).json({ error: `El número de serie ${nuevoSerie} ya existe` });
+            herramienta.nro_serie = nuevoSerie;
+        }
+
+        // Buscar o crear el producto con el nuevo nombre
+        let producto = await Producto.findOne({ where: { nombre: nuevoNombre.toUpperCase() } });
+        if (!producto) {
+            producto = await Producto.create({ nombre: nuevoNombre.toUpperCase(), tipo: 'RETORNABLE', activo: true });
+        } else {
+            producto.activo = true;
+            await producto.save();
+        }
+        herramienta.productoId = producto.id;
+        await herramienta.save();
+
+        res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

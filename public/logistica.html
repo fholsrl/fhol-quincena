@@ -89,7 +89,10 @@
     <div id="panel-herramientas" class="panel hidden bg-white p-4 rounded-b-xl shadow-lg border border-t-0 border-slate-200">
         <div class="flex justify-between items-center mb-4">
             <h2 class="font-bold text-slate-700">HERRAMIENTAS POR NÚMERO DE SERIE</h2>
-            <button onclick="abrirModalHerramienta()" class="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-blue-700">+ REGISTRAR HERRAMIENTA</button>
+            <div class="flex gap-2">
+                <button onclick="descargarExcelHerramientas()" class="bg-emerald-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-emerald-700">⬇ Excel</button>
+                <button onclick="abrirModalHerramienta()" class="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-blue-700">+ REGISTRAR HERRAMIENTA</button>
+            </div>
         </div>
         <!-- Filtros -->
         <div class="flex gap-2 mb-3 flex-wrap">
@@ -98,6 +101,9 @@
                 <option value="DISPONIBLE">✅ Disponible</option>
                 <option value="EN_OBRA">🏗️ En obra</option>
                 <option value="REPARACION">🔨 En reparación</option>
+            </select>
+            <select id="filtro-herr-ubicacion" onchange="cargarHerramientas()" class="border p-1 rounded text-sm">
+                <option value="">Todas las ubicaciones</option>
             </select>
             <input id="filtro-herr-nombre" oninput="cargarHerramientas()" placeholder="Buscar producto o nro serie..." class="border p-1 rounded text-sm flex-1">
         </div>
@@ -753,6 +759,17 @@ async function darBaja(id, nombre) {
 }
 
 // ─── EXCEL ────────────────────────────────────────────────────────────────────
+function descargarExcelHerramientas() {
+    const estado = document.getElementById('filtro-herr-estado').value;
+    const ubicacion = document.getElementById('filtro-herr-ubicacion').value;
+    let url = '/logistica/excel/herramientas';
+    const params = [];
+    if (estado)   params.push(`estado=${encodeURIComponent(estado)}`);
+    if (ubicacion) params.push(`ubicacion=${encodeURIComponent(ubicacion)}`);
+    if (params.length) url += '?' + params.join('&');
+    window.location.href = url;
+}
+
 function descargarExcelGeneral() {
     window.location.href = '/logistica/excel/general';
 }
@@ -775,21 +792,32 @@ async function cargarHerramientas() {
     try {
         const res = await fetch('/logistica/herramientas');
         todasHerramientas = await res.json();
+
+        // Poblar filtro de ubicaciones
+        const selUbic = document.getElementById('filtro-herr-ubicacion');
+        const ubicActual = selUbic.value;
+        const ubicaciones_herr = [...new Set(todasHerramientas
+            .map(h => h.Ubicacion ? h.Ubicacion.nombre : null).filter(Boolean))].sort();
+        selUbic.innerHTML = '<option value="">Todas las ubicaciones</option>' +
+            ubicaciones_herr.map(u => `<option value="${u}" ${u === ubicActual ? 'selected' : ''}>${u}</option>`).join('');
+
         renderHerramientas();
     } catch (e) { console.error('Error cargando herramientas', e); }
 }
 
 function renderHerramientas() {
     const filtroEstado = document.getElementById('filtro-herr-estado').value;
+    const filtroUbic   = document.getElementById('filtro-herr-ubicacion').value;
     const filtroBusq   = document.getElementById('filtro-herr-nombre').value.toLowerCase();
     const tabla = document.getElementById('tabla-herramientas');
 
     const filtradas = todasHerramientas.filter(h => {
         const matchEstado = !filtroEstado || h.estado === filtroEstado;
-        const matchBusq   = !filtroBusq ||
+        const matchUbic   = !filtroUbic   || (h.Ubicacion && h.Ubicacion.nombre === filtroUbic);
+        const matchBusq   = !filtroBusq   ||
             h.Producto.nombre.toLowerCase().includes(filtroBusq) ||
             h.nro_serie.toLowerCase().includes(filtroBusq);
-        return matchEstado && matchBusq;
+        return matchEstado && matchUbic && matchBusq;
     });
 
     if (!filtradas.length) {
@@ -809,6 +837,7 @@ function renderHerramientas() {
             <td class="p-2 text-center">
                 <div class="flex gap-1 justify-center flex-wrap">
                     ${h.estado !== 'BAJA' ? `<button onclick="moverHerramienta(${h.id},'${h.nro_serie}')" class="bg-blue-600 text-white text-xs px-2 py-1 rounded hover:bg-blue-700">Mover</button>` : ''}
+                    <button onclick="editarHerramienta(${h.id},'${h.Producto.nombre.replace(/'/g,"\\'")}','${h.nro_serie}')" class="bg-slate-500 text-white text-xs px-2 py-1 rounded hover:bg-slate-600">✏️ Editar</button>
                     ${(h.estado === 'DISPONIBLE' || h.estado === 'EN_OBRA') ? `<button onclick="cambiarEstadoHerr(${h.id},'REPARACION')" class="bg-yellow-500 text-white text-xs px-2 py-1 rounded hover:bg-yellow-600">Reparación</button>` : ''}
                     ${h.estado !== 'DISPONIBLE' && h.estado !== 'BAJA' ? `<button onclick="cambiarEstadoHerr(${h.id},'DISPONIBLE')" class="bg-green-600 text-white text-xs px-2 py-1 rounded hover:bg-green-700">Disponible</button>` : ''}
                     ${h.estado !== 'BAJA' ? `<button onclick="cambiarEstadoHerr(${h.id},'BAJA')" class="bg-red-600 text-white text-xs px-2 py-1 rounded hover:bg-red-700">Baja</button>` : ''}
@@ -872,6 +901,64 @@ async function guardarHerramienta() {
     const data = await res.json();
     if (data.error) return alert(data.error);
     cerrarModalHerr();
+    cargarHerramientas();
+    cargarEstado();
+}
+
+async function editarHerramienta(id, nombreActual, serieActual) {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
+
+    // Obtener productos existentes de herramientas
+    const resProds = await fetch('/logistica/herramientas/productos');
+    const productos = await resProds.json();
+
+    modal.innerHTML = `
+        <div class="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <h3 class="font-bold text-slate-800 text-lg border-b pb-2">✏️ Editar Herramienta</h3>
+            <div>
+                <label class="text-xs font-bold text-slate-400">PRODUCTO:</label>
+                <select id="herr-edit-prod-sel" onchange="toggleEditNuevo()" class="w-full border-2 p-2 rounded-lg mt-1 text-sm">
+                    ${productos.map(p => `<option value="${p.nombre}" ${p.nombre === nombreActual ? 'selected' : ''}>${p.nombre}</option>`).join('')}
+                    <option value="__nuevo__">➕ Nuevo nombre</option>
+                </select>
+                <input id="herr-edit-prod-input" placeholder="Nuevo nombre de herramienta" class="w-full border-2 p-2 rounded-lg mt-1 text-sm hidden">
+            </div>
+            <div>
+                <label class="text-xs font-bold text-slate-400">NÚMERO DE SERIE:</label>
+                <input id="herr-edit-serie" value="${serieActual}" class="w-full border-2 p-2 rounded-lg mt-1 font-mono text-sm">
+            </div>
+            <div class="flex gap-2 pt-2">
+                <button onclick="guardarEdicionHerramienta(${id})" class="flex-1 bg-blue-600 text-white font-bold py-2 rounded-lg hover:bg-blue-700">GUARDAR</button>
+                <button onclick="this.closest('.fixed').remove()" class="flex-1 bg-slate-200 text-slate-700 font-bold py-2 rounded-lg hover:bg-slate-300">CANCELAR</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
+
+function toggleEditNuevo() {
+    const sel = document.getElementById('herr-edit-prod-sel').value;
+    const inp = document.getElementById('herr-edit-prod-input');
+    if (sel === '__nuevo__') { inp.classList.remove('hidden'); inp.focus(); }
+    else inp.classList.add('hidden');
+}
+
+async function guardarEdicionHerramienta(id) {
+    const sel = document.getElementById('herr-edit-prod-sel').value;
+    const nuevoNombre = sel === '__nuevo__'
+        ? document.getElementById('herr-edit-prod-input').value.trim()
+        : sel;
+    const nuevoSerie = document.getElementById('herr-edit-serie').value.trim();
+    if (!nuevoNombre || !nuevoSerie) return alert('Completá todos los campos');
+
+    const res = await fetch('/logistica/herramientas/editar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ herramientaId: id, nuevoNombre, nuevoSerie })
+    });
+    const data = await res.json();
+    if (data.error) return alert(data.error);
+    document.querySelector('.fixed')?.remove();
     cargarHerramientas();
     cargarEstado();
 }
