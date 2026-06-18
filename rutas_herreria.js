@@ -1,0 +1,655 @@
+// rutas_herreria.js — Módulo de Herrería FHOL — Teoría de Restricciones
+const express  = require('express');
+const router   = express.Router();
+const ExcelJS  = require('exceljs');
+const { Op }   = require('sequelize');
+const { Proyecto, Tarea, KitItem, Historial } = require('./database_herreria');
+
+const proteger = (req, res, next) => {
+    if (req.session && req.session.user) return next();
+    res.status(401).json({ error: 'No autorizado' });
+};
+
+// ── Utilidades ────────────────────────────────────────────────────────────────
+
+// Avanza N días hábiles desde una fecha, saltando sab/dom
+function sumarDiasHabiles(fecha, dias) {
+    let d = new Date(fecha);
+    let restantes = dias;
+    while (restantes > 0) {
+        d.setDate(d.getDate() + 1);
+        if (d.getDay() !== 0 && d.getDay() !== 6) restantes--;
+    }
+    return d;
+}
+
+// Días hábiles transcurridos desde una fecha hasta hoy
+function diasHabilesDesde(fecha) {
+    if (!fecha) return 0;
+    let d = new Date(fecha);
+    const hoy = new Date();
+    let count = 0;
+    while (d < hoy) {
+        d.setDate(d.getDate() + 1);
+        if (d.getDay() !== 0 && d.getDay() !== 6) count++;
+    }
+    return count;
+}
+
+// Calcula el buffer correcto: ceil(dias * 0.30)
+function calcBuf(dias) { return Math.ceil(dias * 0.30); }
+
+// Registra un cambio en el historial del proyecto
+async function log(proyectoId, accion, usuario, datos = null) {
+    await Historial.create({ proyectoId, accion, usuario, datos });
+}
+
+// ── PROYECTOS ─────────────────────────────────────────────────────────────────
+
+// GET /herreria/proyectos — lista todos con estado de buffer
+router.get('/proyectos', proteger, async (req, res) => {
+    try {
+        const proyectos = await Proyecto.findAll({
+            include: [{ model: Tarea, include: [KitItem] }],
+            order: [['createdAt', 'DESC'], [Tarea, 'orden', 'ASC']]
+        });
+
+        const resultado = proyectos.map(p => enriquecerProyecto(p));
+        res.json(resultado);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /herreria/proyectos/:id — detalle completo
+router.get('/proyectos/:id', proteger, async (req, res) => {
+    try {
+        const p = await Proyecto.findByPk(req.params.id, {
+            include: [
+                { model: Tarea, include: [KitItem] },
+                { model: Historial, limit: 50, order: [['createdAt', 'DESC']] }
+            ]
+        });
+        if (!p) return res.status(404).json({ error: 'No encontrado' });
+        res.json(enriquecerProyecto(p));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /herreria/proyectos — crear
+router.post('/proyectos', proteger, async (req, res) => {
+    try {
+        const { nombre, cliente, responsable, notas, tareas } = req.body;
+        if (!nombre) return res.status(400).json({ error: 'Nombre obligatorio' });
+
+        const p = await Proyecto.create({
+            nombre, cliente, responsable, notas,
+            estado: 'BORRADOR',
+            creadoPor: req.session.user.username
+        });
+
+        // Crear tareas si vienen en el body
+        if (tareas && tareas.length) {
+            for (let i = 0; i < tareas.length; i++) {
+                const t = tareas[i];
+                const buf = calcBuf(t.diasHabiles || 1);
+                const tarea = await Tarea.create({
+                    proyectoId: p.id,
+                    nombre: t.nombre,
+                    tipo:   t.tipo   || 'NORMAL',
+                    estado: t.tipo === 'ESPERA' ? 'ESPERA' : 'PENDIENTE',
+                    diasHabiles: t.diasHabiles || 1,
+                    bufferDias:  buf,
+                    orden: i
+                });
+                if (t.kit && t.kit.length) {
+                    for (const item of t.kit) {
+                        await KitItem.create({
+                            tareaId: tarea.id,
+                            descripcion: item.descripcion,
+                            esSugerida:  item.esSugerida || false
+                        });
+                    }
+                }
+            }
+        }
+
+        // Recalcular totales del proyecto
+        await recalcularTotales(p.id);
+        await log(p.id, 'Proyecto creado', req.session.user.username, { nombre, cliente });
+        res.json(await Proyecto.findByPk(p.id, { include: [{ model: Tarea, include: [KitItem] }] }));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /herreria/proyectos/:id — editar (solo jefe)
+router.put('/proyectos/:id', proteger, async (req, res) => {
+    try {
+        const rol = req.session.user.rol;
+        if (rol !== 'admin') return res.status(403).json({ error: 'Solo el jefe puede editar el proyecto' });
+        const p = await Proyecto.findByPk(req.params.id);
+        if (!p) return res.status(404).json({ error: 'No encontrado' });
+        const anterior = { nombre: p.nombre, cliente: p.cliente, responsable: p.responsable };
+        const { nombre, cliente, responsable, notas } = req.body;
+        if (nombre)      p.nombre      = nombre;
+        if (cliente)     p.cliente     = cliente;
+        if (responsable) p.responsable = responsable;
+        if (notas !== undefined) p.notas = notas;
+        await p.save();
+        await log(p.id, 'Proyecto editado', req.session.user.username, { anterior, nuevo: req.body });
+        res.json(p);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /herreria/proyectos/:id/activar
+router.post('/proyectos/:id/activar', proteger, async (req, res) => {
+    try {
+        const p = await Proyecto.findByPk(req.params.id, { include: [Tarea] });
+        if (!p) return res.status(404).json({ error: 'No encontrado' });
+        if (p.estado === 'ACTIVO') return res.json({ ok: true, message: 'Ya activo' });
+
+        p.estado = 'ACTIVO';
+        p.activadoEn = new Date();
+        await p.save();
+
+        // Activar tareas que NO están en espera, en orden
+        let cursor = new Date();
+        for (const t of p.Tareas.sort((a, b) => a.orden - b.orden)) {
+            if (t.tipo === 'ESPERA') continue;
+            if (t.estado === 'PENDIENTE') {
+                t.activadaEn = cursor;
+                t.estado     = 'EN_PROCESO';
+                await t.save();
+                cursor = sumarDiasHabiles(cursor, t.diasHabiles + t.bufferDias);
+            }
+        }
+        await log(p.id, 'Proyecto activado', req.session.user.username);
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /herreria/proyectos/:id/pausar
+router.post('/proyectos/:id/pausar', proteger, async (req, res) => {
+    try {
+        const p = await Proyecto.findByPk(req.params.id);
+        if (!p) return res.status(404).json({ error: 'No encontrado' });
+        p.estado    = 'PAUSADO';
+        p.pausadoEn = new Date();
+        await p.save();
+        await log(p.id, 'Proyecto pausado', req.session.user.username, { motivo: req.body.motivo });
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /herreria/proyectos/:id/terminar
+router.post('/proyectos/:id/terminar', proteger, async (req, res) => {
+    try {
+        const p = await Proyecto.findByPk(req.params.id);
+        if (!p) return res.status(404).json({ error: 'No encontrado' });
+        p.estado      = 'TERMINADO';
+        p.terminadoEn = new Date();
+        await p.save();
+        await log(p.id, 'Proyecto terminado', req.session.user.username);
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── TAREAS ────────────────────────────────────────────────────────────────────
+
+// POST /herreria/tareas — agregar tarea a proyecto existente
+router.post('/tareas', proteger, async (req, res) => {
+    try {
+        if (req.session.user.rol !== 'admin')
+            return res.status(403).json({ error: 'Solo el jefe puede agregar tareas' });
+        const { proyectoId, nombre, tipo, diasHabiles, kit } = req.body;
+        const buf = calcBuf(diasHabiles || 1);
+        const maxOrden = await Tarea.max('orden', { where: { proyectoId } }) || 0;
+        const t = await Tarea.create({
+            proyectoId, nombre, tipo: tipo || 'NORMAL',
+            estado: tipo === 'ESPERA' ? 'ESPERA' : 'PENDIENTE',
+            diasHabiles: diasHabiles || 1, bufferDias: buf,
+            orden: maxOrden + 1
+        });
+        if (kit && kit.length) {
+            for (const item of kit) {
+                await KitItem.create({ tareaId: t.id, descripcion: item.descripcion });
+            }
+        }
+        await recalcularTotales(proyectoId);
+        await log(proyectoId, `Tarea agregada: ${nombre}`, req.session.user.username);
+        res.json(await Tarea.findByPk(t.id, { include: [KitItem] }));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /herreria/tareas/:id — editar tarea (jefe) o actualizar avance (supervisor)
+router.put('/tareas/:id', proteger, async (req, res) => {
+    try {
+        const t = await Tarea.findByPk(req.params.id);
+        if (!t) return res.status(404).json({ error: 'No encontrada' });
+        const esJefe = req.session.user.rol === 'admin';
+        const anterior = { avancePct: t.avancePct, estado: t.estado };
+
+        if (esJefe) {
+            // El jefe puede cambiar todo
+            const { nombre, tipo, diasHabiles, estado, notas } = req.body;
+            if (nombre)      t.nombre      = nombre;
+            if (tipo)        t.tipo        = tipo;
+            if (diasHabiles) { t.diasHabiles = diasHabiles; t.bufferDias = calcBuf(diasHabiles); }
+            if (estado)      t.estado      = estado;
+        }
+
+        // Avance lo puede cambiar el jefe o supervisor
+        if (req.body.avancePct !== undefined) {
+            t.avancePct = parseInt(req.body.avancePct);
+            if (t.avancePct >= 100) {
+                t.avancePct   = 100;
+                t.estado      = 'COMPLETADA';
+                t.completadaEn = new Date();
+            }
+        }
+
+        // Días hábiles consumidos — actualizar
+        if (t.activadaEn) {
+            t.diasHabilesConsumidos = diasHabilesDesde(t.activadaEn);
+        }
+
+        await t.save();
+        await recalcularTotales(t.proyectoId);
+        await log(t.proyectoId, `Tarea "${t.nombre}" actualizada`, req.session.user.username,
+            { anterior, nuevo: { avancePct: t.avancePct, estado: t.estado } });
+        res.json(t);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /herreria/tareas/:id/activar — activar tarea en espera
+router.post('/tareas/:id/activar', proteger, async (req, res) => {
+    try {
+        const t = await Tarea.findByPk(req.params.id);
+        if (!t) return res.status(404).json({ error: 'No encontrada' });
+        t.estado     = 'EN_PROCESO';
+        t.activadaEn = new Date();
+        await t.save();
+        await log(t.proyectoId, `Tarea "${t.nombre}" activada desde espera`, req.session.user.username);
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── KIT ───────────────────────────────────────────────────────────────────────
+
+// PUT /herreria/kit/:id — marcar o desmarcar ítem
+router.put('/kit/:id', proteger, async (req, res) => {
+    try {
+        const item = await KitItem.findByPk(req.params.id, { include: [Tarea] });
+        if (!item) return res.status(404).json({ error: 'No encontrado' });
+        item.completado = req.body.completado;
+        if (item.completado) {
+            item.completadoPor = req.session.user.username;
+            item.completadoEn  = new Date();
+        } else {
+            item.completadoPor = null;
+            item.completadoEn  = null;
+        }
+        await item.save();
+        await log(item.Tarea.proyectoId,
+            `Kit "${item.descripcion}" ${item.completado ? 'completado' : 'desmarcado'}`,
+            req.session.user.username);
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /herreria/kit — agregar ítem al kit de una tarea
+router.post('/kit', proteger, async (req, res) => {
+    try {
+        const { tareaId, descripcion } = req.body;
+        const item = await KitItem.create({ tareaId, descripcion });
+        const t = await Tarea.findByPk(tareaId);
+        await log(t.proyectoId, `Kit agregado: "${descripcion}"`, req.session.user.username);
+        res.json(item);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /herreria/kit/sugeridas — ítems que se repiten en 2+ proyectos
+router.get('/kit/sugeridas', proteger, async (req, res) => {
+    try {
+        const items = await KitItem.findAll({ attributes: ['descripcion'] });
+        const freq = {};
+        items.forEach(i => { freq[i.descripcion] = (freq[i.descripcion] || 0) + 1; });
+        const sugeridas = Object.entries(freq)
+            .filter(([, n]) => n >= 2)
+            .sort((a, b) => b[1] - a[1])
+            .map(([descripcion, count]) => ({ descripcion, count }));
+        res.json(sugeridas);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── HISTORIAL ─────────────────────────────────────────────────────────────────
+
+// POST /herreria/proyectos/:id/nota — agregar nota manual al historial
+router.post('/proyectos/:id/nota', proteger, async (req, res) => {
+    try {
+        await log(req.params.id, req.body.nota, req.session.user.username);
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── RESTRICCIÓN CRUZADA ───────────────────────────────────────────────────────
+// GET /herreria/restriccion — detecta el recurso con mayor carga entre proyectos activos
+router.get('/restriccion', proteger, async (req, res) => {
+    try {
+        const activos = await Proyecto.findAll({
+            where: { estado: 'ACTIVO' },
+            include: [{ model: Tarea, where: { tipo: 'RESTRICCION', estado: { [Op.ne]: 'COMPLETADA' } }, required: false }]
+        });
+        const carga = {};
+        activos.forEach(p => {
+            (p.Tareas || []).forEach(t => {
+                if (!carga[t.nombre]) carga[t.nombre] = { tareas: [], totalDias: 0 };
+                carga[t.nombre].tareas.push({ proyecto: p.nombre, dias: t.diasHabiles, avance: t.avancePct });
+                carga[t.nombre].totalDias += t.diasHabiles;
+            });
+        });
+        const ranking = Object.entries(carga)
+            .map(([nombre, data]) => ({ nombre, ...data }))
+            .sort((a, b) => b.totalDias - a.totalDias);
+        res.json({ restriccion: ranking[0] || null, ranking });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── INFORME DE CIERRE (Excel + PDF) ──────────────────────────────────────────
+router.get('/proyectos/:id/informe', proteger, async (req, res) => {
+    try {
+        const p = await Proyecto.findByPk(req.params.id, {
+            include: [
+                { model: Tarea, include: [KitItem] },
+                { model: Historial, order: [['createdAt', 'ASC']] }
+            ]
+        });
+        if (!p) return res.status(404).json({ error: 'No encontrado' });
+
+        const wb = new ExcelJS.Workbook();
+        wb.creator = 'FHOL'; wb.created = new Date();
+
+        const C = {
+            az:'1E3A8A', vt:'7C3AED', vd:'059669', na:'EA580C', rj:'DC2626',
+            gh:'334155', gc:'F1F5F9', bl:'FFFFFF', vc:'D1FAE5', rc:'FEE2E2',
+            xc:'EDE9FE', am:'FFFBEB'
+        };
+        const F = c => ({ type:'pattern', pattern:'solid', fgColor:{ argb: c } });
+        const fn = (bold=false,color='1E293B',size=10) =>
+            ({ name:'Arial', bold, color:{ argb: color }, size });
+        const th = () => { const s={style:'thin',color:{argb:'CBD5E1'}};
+            return {left:s,right:s,top:s,bottom:s}; };
+        const al = (h='left',v='center',wrap=false) =>
+            ({ horizontal:h, vertical:v, wrapText:wrap });
+
+        // ── Hoja 1: Resumen ──────────────────────────────────────────────────
+        const ws1 = wb.addWorksheet('Resumen del proyecto');
+        ws1.sheet_view_showGridLines = false;
+        ws1.showGridLines = false;
+        ws1.columns = [
+            {width:22},{width:38},{width:18},{width:18},{width:18},{width:18}
+        ];
+
+        ws1.mergeCells('A1:F1');
+        const t1 = ws1.getCell('A1');
+        t1.value = `INFORME DE CIERRE — ${p.nombre.toUpperCase()}`;
+        t1.font = { name:'Arial Black', size:13, bold:true, color:{argb:C.bl} };
+        t1.fill = F(C.az); t1.alignment = al('left','center');
+        ws1.getRow(1).height = 30;
+
+        ws1.mergeCells('A2:F2');
+        const t2 = ws1.getCell('A2');
+        t2.value = `FHOL Herrería · Uso exclusivo interno · ${new Date().toLocaleDateString('es-AR')}`;
+        t2.font = fn(false,'94A3B8',9); t2.fill = F(C.gc);
+        t2.alignment = al('right','center');
+        ws1.getRow(2).height = 16;
+
+        const datos = [
+            ['Cliente / obra', p.cliente || '—'],
+            ['Responsable',    p.responsable || '—'],
+            ['Estado',         p.estado],
+            ['Creado por',     p.creadoPor || '—'],
+            ['Activado el',    p.activadoEn ? new Date(p.activadoEn).toLocaleDateString('es-AR') : '—'],
+            ['Terminado el',   p.terminadoEn ? new Date(p.terminadoEn).toLocaleDateString('es-AR') : '—'],
+            ['Días de plan',   p.diasHabilesTotales + ' días hábiles'],
+            ['Buffer total',   p.bufferDias + ' días hábiles (30%)'],
+            ['Horizonte total',(p.diasHabilesTotales + p.bufferDias) + ' días hábiles'],
+        ];
+        datos.forEach((d, i) => {
+            const r = i + 4;
+            ws1.getRow(r).height = 18;
+            const ca = ws1.getCell(`A${r}`);
+            ca.value = d[0]; ca.font = fn(true,C.gh,9);
+            ca.fill = F(C.gc); ca.alignment = al('right','center'); ca.border = th();
+            const cb = ws1.getCell(`B${r}`);
+            cb.value = d[1]; cb.font = fn(false,'1E293B',10);
+            cb.fill = F(C.bl); cb.alignment = al('left','center'); cb.border = th();
+        });
+
+        // Notas
+        if (p.notas) {
+            ws1.mergeCells('A14:F14');
+            ws1.getCell('A14').value = 'Notas del proyecto';
+            ws1.getCell('A14').font = fn(true,C.bl,9);
+            ws1.getCell('A14').fill = F(C.gh);
+            ws1.getRow(14).height = 18;
+            ws1.mergeCells('A15:F16');
+            ws1.getCell('A15').value = p.notas;
+            ws1.getCell('A15').font = fn(false,'1E293B',9);
+            ws1.getCell('A15').fill = F(C.am);
+            ws1.getCell('A15').alignment = al('left','top',true);
+            ws1.getRow(15).height = 32;
+        }
+
+        // ── Hoja 2: Tareas y buffer ──────────────────────────────────────────
+        const ws2 = wb.addWorksheet('Tareas y buffer');
+        ws2.showGridLines = false;
+        ws2.columns = [{width:8},{width:30},{width:14},{width:14},{width:12},
+                       {width:10},{width:12},{width:16},{width:28}];
+
+        ws2.mergeCells('A1:I1');
+        const th2 = ws2.getCell('A1');
+        th2.value = 'TAREAS Y CONSUMO DE BUFFER — ' + p.nombre.toUpperCase();
+        th2.font = { name:'Arial Black', size:11, bold:true, color:{argb:C.bl} };
+        th2.fill = F(C.az); th2.alignment = al('left','center');
+        ws2.getRow(1).height = 26;
+
+        const hdrs2 = ['#','Tarea','Tipo','Estado','Días plan',
+                       'Buffer','Avance %','Días consumidos','Observación'];
+        const hc2 = ['az','az','vt','az','vd','vt','vd','az','gh'];
+        hdrs2.forEach((h,i) => {
+            const c = ws2.getRow(2).getCell(i+1);
+            c.value = h; c.font = fn(true,C.bl,9);
+            c.fill = F(C[hc2[i]]); c.alignment = al('center','center'); c.border = th();
+        });
+        ws2.getRow(2).height = 22;
+
+        const tareasOrdenadas = (p.Tareas || []).sort((a,b) => a.orden - b.orden);
+        tareasOrdenadas.forEach((t,i) => {
+            const row = i + 3;
+            ws2.getRow(row).height = 17;
+            const esHito = t.tipo === 'RESTRICCION';
+            const vals = [
+                i+1, t.nombre, t.tipo, t.estado,
+                t.diasHabiles, t.bufferDias,
+                t.avancePct + '%',
+                t.diasHabilesConsumidos || 0,
+                ''
+            ];
+            vals.forEach((v,j) => {
+                const c = ws2.getRow(row).getCell(j+1);
+                c.value = v; c.border = th();
+                c.alignment = al(j===1?'left':'center','center');
+                if (j === 0) { c.fill=F(C.gc); c.font=fn(true,C.az,8); }
+                else if (j === 1) {
+                    c.fill = F(esHito ? C.rc : C.bl);
+                    c.font = fn(esHito, esHito ? C.rj : '1E293B', 9);
+                }
+                else if (j === 2) { c.fill=F(C.xc); c.font=fn(false,'4C1D95',9); }
+                else if (j === 5) { c.fill=F(C.xc); c.font=fn(true,'534AB7',9); }
+                else if (j === 6) {
+                    const pct = parseInt(t.avancePct);
+                    const bg = pct >= 100 ? C.vc : pct >= 50 ? C.am : C.rc;
+                    c.fill=F(bg);
+                    c.font=fn(true, pct>=100?C.vd:'1E293B', 9);
+                }
+                else { c.fill=F(C.bl); c.font=fn(false,'1E293B',9); }
+            });
+        });
+
+        // Totales
+        const totRow = tareasOrdenadas.length + 3;
+        ws2.mergeCells(`A${totRow}:D${totRow}`);
+        ws2.getCell(`A${totRow}`).value = 'TOTALES';
+        ws2.getCell(`A${totRow}`).font = fn(true,C.bl,9);
+        ws2.getCell(`A${totRow}`).fill = F(C.gh);
+        ws2.getCell(`A${totRow}`).alignment = al('right','center');
+        ws2.getRow(totRow).height = 18;
+        const sumDias = tareasOrdenadas.reduce((s,t)=>s+t.diasHabiles,0);
+        const sumBuf  = tareasOrdenadas.reduce((s,t)=>s+t.bufferDias,0);
+        ws2.getCell(`E${totRow}`).value = sumDias;
+        ws2.getCell(`F${totRow}`).value = sumBuf;
+        [ws2.getCell(`E${totRow}`), ws2.getCell(`F${totRow}`)].forEach(c=>{
+            c.font=fn(true,C.bl,10); c.fill=F(C.gh);
+            c.alignment=al('center','center'); c.border=th();
+        });
+
+        // ── Hoja 3: Kit de compuertas ────────────────────────────────────────
+        const ws3 = wb.addWorksheet('Kit de compuertas');
+        ws3.showGridLines = false;
+        ws3.columns = [{width:8},{width:28},{width:38},{width:14},{width:18},{width:22}];
+
+        ws3.mergeCells('A1:F1');
+        ws3.getCell('A1').value = 'KIT DE COMPUERTAS — ' + p.nombre.toUpperCase();
+        ws3.getCell('A1').font = {name:'Arial Black',size:11,bold:true,color:{argb:C.bl}};
+        ws3.getCell('A1').fill = F(C.vt); ws3.getCell('A1').alignment = al('left','center');
+        ws3.getRow(1).height = 26;
+
+        const hdrs3=['#','Tarea','Ítem del kit','Completado','Por quién','Cuándo'];
+        hdrs3.forEach((h,i)=>{
+            const c = ws3.getRow(2).getCell(i+1);
+            c.value=h; c.font=fn(true,C.bl,9); c.fill=F(C.vt);
+            c.alignment=al('center','center'); c.border=th();
+        });
+        ws3.getRow(2).height=20;
+
+        let kitRow=3;
+        tareasOrdenadas.forEach((t,ti) => {
+            if (!t.KitItems || !t.KitItems.length) return;
+            t.KitItems.forEach((item,ki) => {
+                ws3.getRow(kitRow).height=17;
+                const vals=[
+                    ki===0 ? ti+1 : '',
+                    ki===0 ? t.nombre : '',
+                    item.descripcion,
+                    item.completado ? 'SI' : 'NO',
+                    item.completadoPor || '—',
+                    item.completadoEn ? new Date(item.completadoEn).toLocaleDateString('es-AR') : '—'
+                ];
+                vals.forEach((v,j)=>{
+                    const c = ws3.getRow(kitRow).getCell(j+1);
+                    c.value=v; c.border=th();
+                    c.alignment=al(j<2?'left':'center','center');
+                    if (j===3) {
+                        c.fill=F(item.completado?C.vc:C.rc);
+                        c.font=fn(true,item.completado?C.vd:C.rj,9);
+                    } else {
+                        c.fill=F(ki===0&&j<2?C.xc:C.bl);
+                        c.font=fn(ki===0&&j<2,C.gh,9);
+                    }
+                });
+                kitRow++;
+            });
+        });
+
+        // ── Hoja 4: Historial completo ───────────────────────────────────────
+        const ws4 = wb.addWorksheet('Historial de cambios');
+        ws4.showGridLines = false;
+        ws4.columns=[{width:20},{width:20},{width:60}];
+
+        ws4.mergeCells('A1:C1');
+        ws4.getCell('A1').value = 'HISTORIAL DE CAMBIOS — ' + p.nombre.toUpperCase();
+        ws4.getCell('A1').font={name:'Arial Black',size:11,bold:true,color:{argb:C.bl}};
+        ws4.getCell('A1').fill=F(C.gh); ws4.getCell('A1').alignment=al('left','center');
+        ws4.getRow(1).height=26;
+
+        ['Fecha y hora','Usuario','Acción'].forEach((h,i)=>{
+            const c=ws4.getRow(2).getCell(i+1);
+            c.value=h; c.font=fn(true,C.bl,9); c.fill=F(C.gh);
+            c.alignment=al('center','center'); c.border=th();
+        });
+        ws4.getRow(2).height=20;
+
+        (p.Historials || []).forEach((h,i)=>{
+            const row=i+3;
+            ws4.getRow(row).height=16;
+            const vals=[
+                new Date(h.createdAt).toLocaleString('es-AR'),
+                h.usuario || '—',
+                h.accion
+            ];
+            vals.forEach((v,j)=>{
+                const c=ws4.getRow(row).getCell(j+1);
+                c.value=v; c.border=th();
+                c.alignment=al(j===2?'left':'center','center',j===2);
+                c.fill=F(i%2===0?C.gc:C.bl);
+                c.font=fn(false,'1E293B',9);
+            });
+        });
+
+        res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition',
+            `attachment; filename=Informe_${p.nombre.replace(/[^a-zA-Z0-9]/g,'_')}.xlsx`);
+        await wb.xlsx.write(res);
+        res.end();
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+async function recalcularTotales(proyectoId) {
+    const tareas = await Tarea.findAll({ where: { proyectoId } });
+    const dias = tareas.reduce((s, t) => s + (t.diasHabiles || 0), 0);
+    const buf  = tareas.reduce((s, t) => s + (t.bufferDias  || 0), 0);
+    await Proyecto.update(
+        { diasHabilesTotales: dias, bufferDias: buf },
+        { where: { id: proyectoId } }
+    );
+}
+
+function enriquecerProyecto(p) {
+    const obj = p.toJSON();
+    const tareas = obj.Tareas || [];
+
+    // Calcular fever chart por tarea activa
+    tareas.forEach(t => {
+        if (!t.activadaEn || t.estado === 'ESPERA' || t.estado === 'PENDIENTE') {
+            t.feverChart = null; return;
+        }
+        const horizonte  = t.diasHabiles + t.bufferDias;
+        const consumidos = t.diasHabilesConsumidos || diasHabilesDesde(t.activadaEn);
+        const tiempoPct  = Math.min(100, Math.round((consumidos / horizonte) * 100));
+        const avancePct  = t.avancePct || 0;
+        const diff       = tiempoPct - avancePct;
+        const bufZonaPct = Math.round((t.bufferDias / horizonte) * 100);
+        const planZonaPct= 100 - bufZonaPct;
+        let bufferEstado = 'OK';
+        if (diff > 20) bufferEstado = 'CRITICO';
+        else if (diff > 0) bufferEstado = 'ALERTA';
+        t.feverChart = { tiempoPct, avancePct, diff, planZonaPct, bufZonaPct, bufferEstado };
+    });
+
+    // Estado general del buffer del proyecto
+    const tareasActivas = tareas.filter(t => t.feverChart);
+    let estadoProyecto = 'OK';
+    if (tareasActivas.some(t => t.feverChart.bufferEstado === 'CRITICO')) estadoProyecto = 'CRITICO';
+    else if (tareasActivas.some(t => t.feverChart.bufferEstado === 'ALERTA')) estadoProyecto = 'ALERTA';
+    obj.bufferEstado = estadoProyecto;
+
+    // Kit completo por tarea
+    tareas.forEach(t => {
+        if (!t.KitItems) { t.kitCompleto = true; return; }
+        t.kitCompleto = t.KitItems.every(k => k.completado);
+        t.kitTotal    = t.KitItems.length;
+        t.kitListos   = t.KitItems.filter(k => k.completado).length;
+    });
+
+    return obj;
+}
+
+module.exports = router;

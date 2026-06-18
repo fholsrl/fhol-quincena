@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FHOL — Herrería</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .tab{padding:8px 14px;border-bottom:3px solid transparent;font-weight:700;font-size:11px;color:#64748b;cursor:pointer;transition:all .15s;white-space:nowrap;}
+        .tab:hover{color:#7c3aed;}
+        .tab.active-tab{color:#7c3aed;border-bottom-color:#7c3aed;}
+
+        /* Fever chart */
+        .fever-wrap{position:relative;height:20px;border-radius:6px;overflow:visible;margin:8px 0 4px;}
+        .fever-bg{position:absolute;inset:0;border-radius:6px;overflow:hidden;display:flex;}
+        .zone-plan{height:100%;background:#D1FAE5;}
+        .zone-buf{height:100%;background:#FEF3C7;}
+        .time-shade{position:absolute;top:0;left:0;height:100%;background:rgba(0,0,0,0.28);transition:width .3s;}
+        .adv-line{position:absolute;top:-4px;bottom:-4px;width:3px;border-radius:1px;background:#059669;box-shadow:0 0 0 2px white;transition:left .3s;}
+        .boundary{position:absolute;top:0;bottom:0;width:1px;background:rgba(0,0,0,0.2);}
+
+        /* Buffer estado badges */
+        .b-ok{@apply bg-green-100 text-green-800;}
+        .b-alerta{@apply bg-yellow-100 text-yellow-800;}
+        .b-critico{@apply bg-red-100 text-red-800;}
+
+        /* Kit checkbox */
+        .kit-check{width:20px;height:20px;border-radius:5px;border:1.5px solid #1D9E75;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;background:white;}
+        .kit-check.done{background:#059669;border-color:#059669;}
+
+        /* Tipo tarea botones */
+        .tipo-opt{padding:3px 10px;border-radius:8px;border:1px solid #e2e8f0;font-size:11px;font-weight:600;cursor:pointer;transition:all .12s;}
+        .tipo-opt.sel-NORMAL{background:#f1f5f9;color:#334155;border-color:#94a3b8;}
+        .tipo-opt.sel-RESTRICCION{background:#fef3c7;color:#92400e;border-color:#d97706;}
+        .tipo-opt.sel-ESPERA{background:#ede9fe;color:#4c1d95;border-color:#7c3aed;}
+    </style>
+</head>
+<body class="bg-slate-100 p-4">
+<div class="max-w-6xl mx-auto space-y-4">
+
+<!-- HEADER -->
+<div class="flex justify-between items-center border-b-4 border-violet-600 pb-2">
+    <h1 class="text-2xl font-black text-slate-800">🔩 FHOL HERRERÍA</h1>
+    <div class="flex items-center gap-3">
+        <a href="/logistica.html" class="bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition">📦 LOGÍSTICA</a>
+        <a href="/" class="bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition">📋 PERSONAL</a>
+        <button onclick="cerrarSesion()" class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition">🚪 SALIR</button>
+        <span id="user-display" class="text-xs font-bold text-slate-500 uppercase">...</span>
+    </div>
+</div>
+
+<!-- RESTRICCIÓN BANNER -->
+<div id="banner-restriccion" class="hidden bg-amber-100 border border-amber-400 text-amber-900 p-3 rounded-xl flex items-center gap-3">
+    <span class="text-xl">⚠️</span>
+    <div>
+        <div class="font-bold text-sm" id="restriccion-titulo">Restricción detectada</div>
+        <div class="text-xs" id="restriccion-detalle"></div>
+    </div>
+</div>
+
+<!-- STATS -->
+<div class="grid grid-cols-2 md:grid-cols-5 gap-3" id="stats-bar">
+    <div class="bg-white rounded-xl p-3 shadow border border-slate-200 text-center">
+        <div class="text-2xl font-black text-slate-800" id="st-total">—</div>
+        <div class="text-xs text-slate-500 font-bold uppercase mt-1">Proyectos activos</div>
+    </div>
+    <div class="bg-white rounded-xl p-3 shadow border border-slate-200 text-center">
+        <div class="text-2xl font-black text-slate-500" id="st-borrador">—</div>
+        <div class="text-xs text-slate-500 font-bold uppercase mt-1">Borradores</div>
+    </div>
+    <div class="bg-white rounded-xl p-3 shadow border border-slate-200 text-center">
+        <div class="text-2xl font-black text-yellow-600" id="st-alerta">—</div>
+        <div class="text-xs text-slate-500 font-bold uppercase mt-1">En alerta</div>
+    </div>
+    <div class="bg-white rounded-xl p-3 shadow border border-slate-200 text-center">
+        <div class="text-2xl font-black text-red-600" id="st-critico">—</div>
+        <div class="text-xs text-slate-500 font-bold uppercase mt-1">Buffer crítico</div>
+    </div>
+    <div class="bg-white rounded-xl p-3 shadow border border-slate-200 text-center">
+        <div class="text-2xl font-black text-slate-800" id="st-terminados">—</div>
+        <div class="text-xs text-slate-500 font-bold uppercase mt-1">Terminados</div>
+    </div>
+</div>
+
+<!-- TABS -->
+<div class="flex flex-wrap gap-0 border-b border-slate-300 bg-white rounded-t-xl px-2 pt-2 shadow border border-b-0 border-slate-200">
+    <button onclick="tab('tablero')"   id="tab-tablero"   class="tab active-tab">📊 Tablero</button>
+    <button onclick="tab('proyectos')" id="tab-proyectos" class="tab">📋 Proyectos</button>
+    <button onclick="tab('nuevo')"     id="tab-nuevo"     class="tab">＋ Nuevo proyecto</button>
+</div>
+
+<!-- PANEL: TABLERO -->
+<div id="panel-tablero" class="space-y-3">
+    <div id="tablero-contenido"></div>
+</div>
+
+<!-- PANEL: PROYECTOS (lista) -->
+<div id="panel-proyectos" class="hidden bg-white rounded-xl shadow border border-slate-200">
+    <div class="p-4 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
+        <div class="flex gap-2 flex-wrap">
+            <select id="filtro-estado" onchange="cargarProyectos()" class="border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-violet-500">
+                <option value="">Todos los estados</option>
+                <option value="BORRADOR">Borrador</option>
+                <option value="ACTIVO">Activo</option>
+                <option value="PAUSADO">Pausado</option>
+                <option value="TERMINADO">Terminado</option>
+            </select>
+        </div>
+        <button onclick="tab('nuevo')" class="bg-violet-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-violet-700 transition">＋ Nuevo proyecto</button>
+    </div>
+    <div id="lista-proyectos" class="divide-y divide-slate-100"></div>
+</div>
+
+<!-- PANEL: NUEVO PROYECTO -->
+<div id="panel-nuevo" class="hidden bg-white rounded-xl shadow border border-slate-200 p-5 space-y-5">
+    <h2 class="font-black text-slate-800 text-lg">＋ Nuevo proyecto de herrería</h2>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Nombre del proyecto *</label>
+            <input id="np-nombre" type="text" class="w-full border-2 border-slate-200 rounded-xl p-3 focus:border-violet-500 outline-none font-bold uppercase" placeholder="Ej: BARANDA ESCALERA — BELGRANO">
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Cliente / obra</label>
+            <input id="np-cliente" type="text" class="w-full border-2 border-slate-200 rounded-xl p-3 focus:border-violet-500 outline-none" placeholder="Constructora...">
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Responsable</label>
+            <input id="np-responsable" type="text" class="w-full border-2 border-slate-200 rounded-xl p-3 focus:border-violet-500 outline-none" placeholder="Supervisor a cargo">
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Notas iniciales</label>
+            <input id="np-notas" type="text" class="w-full border-2 border-slate-200 rounded-xl p-3 focus:border-violet-500 outline-none" placeholder="Observaciones generales...">
+        </div>
+    </div>
+
+    <!-- Tareas -->
+    <div>
+        <div class="flex justify-between items-center mb-3">
+            <h3 class="font-black text-slate-700 text-sm">Tareas y secuencia</h3>
+            <span class="text-xs text-slate-400 italic">Las fechas se calculan al activar el proyecto</span>
+        </div>
+        <div id="np-tareas" class="space-y-3"></div>
+        <button onclick="agregarTareaForm()" class="mt-3 w-full border-2 border-dashed border-slate-300 hover:border-violet-400 text-slate-400 hover:text-violet-600 py-3 rounded-xl font-bold text-sm transition">＋ Agregar tarea</button>
+    </div>
+
+    <!-- Resumen días -->
+    <div class="bg-slate-50 rounded-xl p-4 grid grid-cols-3 gap-4 text-center">
+        <div>
+            <div class="text-xl font-black text-slate-800" id="np-dias-plan">0</div>
+            <div class="text-xs text-slate-500 font-bold uppercase">Días de plan</div>
+        </div>
+        <div>
+            <div class="text-xl font-black text-violet-600" id="np-dias-buf">0</div>
+            <div class="text-xs text-slate-500 font-bold uppercase">Buffer 30%</div>
+        </div>
+        <div>
+            <div class="text-xl font-black text-slate-800" id="np-dias-total">0</div>
+            <div class="text-xs text-slate-500 font-bold uppercase">Horizonte total</div>
+        </div>
+    </div>
+
+    <div class="flex gap-3">
+        <button onclick="guardarProyecto('ACTIVO')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl hover:bg-green-700 transition">▶ Guardar y activar</button>
+        <button onclick="guardarProyecto('BORRADOR')" class="flex-1 bg-slate-200 text-slate-700 font-black py-3 rounded-xl hover:bg-slate-300 transition">💾 Guardar borrador</button>
+    </div>
+</div>
+
+<!-- PANEL: DETALLE PROYECTO (se abre inline) -->
+<div id="panel-detalle" class="hidden space-y-4">
+    <div class="flex items-center gap-3">
+        <button onclick="cerrarDetalle()" class="text-xs font-bold text-slate-500 hover:text-violet-600 flex items-center gap-1">← Volver</button>
+        <span class="text-slate-300">/</span>
+        <h2 class="font-black text-slate-800 text-lg" id="det-titulo">—</h2>
+        <span id="det-estado-badge" class="text-xs font-bold px-3 py-1 rounded-full ml-auto"></span>
+    </div>
+
+    <!-- Acciones rápidas -->
+    <div class="flex flex-wrap gap-2" id="det-acciones"></div>
+
+    <!-- Fever chart global del proyecto -->
+    <div class="bg-white rounded-xl p-4 shadow border border-slate-200" id="det-fever-global"></div>
+
+    <!-- Tareas -->
+    <div id="det-tareas" class="space-y-3"></div>
+
+    <!-- Historial -->
+    <div class="bg-white rounded-xl shadow border border-slate-200">
+        <div class="p-3 border-b border-slate-100 font-bold text-slate-700 text-sm flex justify-between items-center">
+            📝 Historial de cambios
+            <button onclick="toggleHistorial()" class="text-xs text-slate-400 hover:text-slate-600">Ver todo</button>
+        </div>
+        <div id="det-historial" class="p-3 space-y-1 text-xs text-slate-500 max-h-40 overflow-y-auto"></div>
+        <div class="p-3 border-t border-slate-100 flex gap-2">
+            <input id="nota-input" type="text" placeholder="Agregar nota al historial..." class="flex-1 border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:border-violet-400">
+            <button onclick="agregarNota()" class="bg-violet-600 text-white text-xs font-bold px-3 py-1 rounded-lg hover:bg-violet-700">Agregar</button>
+        </div>
+    </div>
+</div>
+
+</div><!-- fin max-w -->
+
+<!-- MODAL EDITAR TAREA -->
+<div id="modal-tarea" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+        <div class="flex justify-between items-center border-b pb-3">
+            <h3 class="text-lg font-black text-slate-800">Editar tarea</h3>
+            <button onclick="cerrarModalTarea()" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">✕</button>
+        </div>
+        <input type="hidden" id="mt-id">
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Nombre</label>
+            <input id="mt-nombre" type="text" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none uppercase text-sm">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Días hábiles</label>
+                <input id="mt-dias" type="number" min="1" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm" oninput="mtCalcBuf()">
+            </div>
+            <div>
+                <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Buffer (30%)</label>
+                <input id="mt-buf" type="text" disabled class="w-full border-2 border-slate-100 bg-violet-50 text-violet-700 rounded-xl p-2 text-sm font-bold">
+            </div>
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Avance (%)</label>
+            <input id="mt-avance" type="range" min="0" max="100" step="1" class="w-full" oninput="document.getElementById('mt-avance-num').textContent=this.value+'%'">
+            <div class="text-right text-sm font-bold text-violet-600 mt-1" id="mt-avance-num">0%</div>
+        </div>
+        <div class="flex gap-2 pt-2">
+            <button onclick="guardarTarea()" class="flex-1 bg-violet-600 text-white font-bold py-2 rounded-xl hover:bg-violet-700">Guardar</button>
+            <button onclick="cerrarModalTarea()" class="flex-1 bg-slate-100 text-slate-700 font-bold py-2 rounded-xl hover:bg-slate-200">Cancelar</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─── Estado global ────────────────────────────────────────────────────────────
+let proyectos = [];
+let proyectoActual = null;
+let npTareas = [];
+let tareasKitSugeridas = [];
+let esAdmin = false;
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+window.onload = async () => {
+    const me = await fetch('/me');
+    if (me.ok) {
+        const d = await me.json();
+        if (!d.logueado) { window.location.href = '/login.html'; return; }
+        document.getElementById('user-display').textContent = d.username;
+        esAdmin = (d.rol === 'admin');
+    }
+    await cargarSugeridas();
+    await cargarProyectos();
+    await cargarRestriccion();
+    agregarTareaForm();
+};
+
+async function cerrarSesion() {
+    await fetch('/logout', { method: 'POST' });
+    window.location.href = '/login.html';
+}
+
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+function tab(nombre) {
+    ['tablero','proyectos','nuevo','detalle'].forEach(p => {
+        document.getElementById(`panel-${p}`).classList.add('hidden');
+        const t = document.getElementById(`tab-${p}`);
+        if (t) t.classList.remove('active-tab');
+    });
+    document.getElementById(`panel-${nombre}`).classList.remove('hidden');
+    const t = document.getElementById(`tab-${nombre}`);
+    if (t) t.classList.add('active-tab');
+}
+
+// ─── Carga de datos ───────────────────────────────────────────────────────────
+async function cargarProyectos() {
+    const estado = document.getElementById('filtro-estado')?.value || '';
+    const url = '/herreria/proyectos' + (estado ? `?estado=${estado}` : '');
+    const res = await fetch(url);
+    proyectos = await res.json();
+    renderEstadisticas();
+    renderTabliero();
+    renderListaProyectos();
+}
+
+async function cargarRestriccion() {
+    const res = await fetch('/herreria/restriccion');
+    const d   = await res.json();
+    const ban = document.getElementById('banner-restriccion');
+    if (d.restriccion && d.restriccion.totalDias > 0) {
+        ban.classList.remove('hidden');
+        document.getElementById('restriccion-titulo').textContent =
+            `Restricción actual: ${d.restriccion.nombre}`;
+        document.getElementById('restriccion-detalle').textContent =
+            `${d.restriccion.tareas.length} proyectos · ${d.restriccion.totalDias} días de carga acumulada`;
+    } else {
+        ban.classList.add('hidden');
+    }
+}
+
+async function cargarSugeridas() {
+    const res = await fetch('/herreria/kit/sugeridas');
+    tareasKitSugeridas = await res.json();
+}
+
+// ─── Estadísticas ─────────────────────────────────────────────────────────────
+function renderEstadisticas() {
+    document.getElementById('st-total').textContent =
+        proyectos.filter(p => p.estado === 'ACTIVO').length;
+    document.getElementById('st-borrador').textContent =
+        proyectos.filter(p => p.estado === 'BORRADOR').length;
+    document.getElementById('st-alerta').textContent =
+        proyectos.filter(p => p.bufferEstado === 'ALERTA').length;
+    document.getElementById('st-critico').textContent =
+        proyectos.filter(p => p.bufferEstado === 'CRITICO').length;
+    document.getElementById('st-terminados').textContent =
+        proyectos.filter(p => p.estado === 'TERMINADO').length;
+}
+
+// ─── Tablero ──────────────────────────────────────────────────────────────────
+function renderTabliero() {
+    const cont = document.getElementById('tablero-contenido');
+    const activos = proyectos.filter(p => p.estado === 'ACTIVO' || p.estado === 'PAUSADO');
+    if (!activos.length) {
+        cont.innerHTML = `<div class="bg-white rounded-xl p-10 text-center text-slate-400 shadow border border-slate-200 italic">
+            No hay proyectos activos. <button onclick="tab('nuevo')" class="text-violet-600 font-bold hover:underline">Crear uno</button>
+        </div>`;
+        return;
+    }
+    cont.innerHTML = activos.map(p => tarjetaTablero(p)).join('');
+}
+
+function tarjetaTablero(p) {
+    const bdg = badgeBuffer(p.bufferEstado);
+    const tareasActivas = (p.Tareas || []).filter(t => t.feverChart);
+    const feverHtml = tareasActivas.length
+        ? tareasActivas.map(t => miniFeverbChart(t)).join('')
+        : `<div class="text-xs text-slate-400 italic mt-2">Sin tareas activas con fever chart</div>`;
+
+    const pausadoBadge = p.estado === 'PAUSADO'
+        ? `<span class="text-xs font-bold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">PAUSADO</span>` : '';
+
+    return `<div class="bg-white rounded-xl p-4 shadow border border-slate-200 cursor-pointer hover:border-violet-300 transition space-y-2"
+        onclick="abrirDetalle(${p.id})">
+        <div class="flex justify-between items-start gap-2 flex-wrap">
+            <div>
+                <div class="font-black text-slate-800 text-sm">${p.nombre}</div>
+                <div class="text-xs text-slate-400 mt-0.5">🏗️ ${p.cliente || '—'} · 👤 ${p.responsable || '—'}</div>
+            </div>
+            <div class="flex items-center gap-2">${pausadoBadge}${bdg}</div>
+        </div>
+        ${feverHtml}
+        <div class="flex justify-between text-xs text-slate-400 pt-1 border-t border-slate-100 mt-1">
+            <span>Plan: ${p.diasHabilesTotales}d · Buffer: ${p.bufferDias}d · Horizonte: ${p.diasHabilesTotales + p.bufferDias}d</span>
+            <span>${(p.Tareas||[]).filter(t=>t.estado==='COMPLETADA').length}/${(p.Tareas||[]).length} tareas</span>
+        </div>
+    </div>`;
+}
+
+function miniFeverbChart(t) {
+    const fc = t.feverChart;
+    if (!fc) return '';
+    const color = fc.bufferEstado === 'CRITICO' ? '#dc2626'
+                : fc.bufferEstado === 'ALERTA'  ? '#d97706' : '#059669';
+    return `<div class="mt-1">
+        <div class="flex justify-between text-xs text-slate-500 mb-0.5">
+            <span class="font-medium">${t.nombre}</span>
+            <span>Avance ${fc.avancePct}% · Tiempo ${fc.tiempoPct}%</span>
+        </div>
+        <div class="fever-wrap" style="height:14px;">
+            <div class="fever-bg">
+                <div class="zone-plan" style="width:${fc.planZonaPct}%"></div>
+                <div class="zone-buf"  style="width:${fc.bufZonaPct}%"></div>
+            </div>
+            <div class="time-shade" style="width:${fc.tiempoPct}%"></div>
+            <div class="boundary" style="left:${fc.planZonaPct}%"></div>
+            <div class="adv-line" style="left:${fc.avancePct}%;background:${color};"></div>
+        </div>
+    </div>`;
+}
+
+// ─── Lista proyectos ──────────────────────────────────────────────────────────
+function renderListaProyectos() {
+    const cont = document.getElementById('lista-proyectos');
+    if (!proyectos.length) {
+        cont.innerHTML = `<div class="p-8 text-center text-slate-400 italic">Sin proyectos. <button onclick="tab('nuevo')" class="text-violet-600 font-bold hover:underline">Crear el primero</button></div>`;
+        return;
+    }
+    cont.innerHTML = proyectos.map(p => `
+        <div class="flex items-center gap-3 p-4 hover:bg-slate-50 cursor-pointer transition" onclick="abrirDetalle(${p.id})">
+            <div class="flex-1 min-w-0">
+                <div class="font-bold text-slate-800 text-sm truncate">${p.nombre}</div>
+                <div class="text-xs text-slate-400">${p.cliente || '—'} · ${p.responsable || '—'}</div>
+            </div>
+            ${badgeBuffer(p.bufferEstado)}
+            ${badgeEstado(p.estado)}
+            <span class="text-slate-300 text-lg">›</span>
+        </div>`).join('');
+}
+
+// ─── Detalle proyecto ─────────────────────────────────────────────────────────
+async function abrirDetalle(id) {
+    const res = await fetch(`/herreria/proyectos/${id}`);
+    proyectoActual = await res.json();
+    renderDetalle();
+    ['tablero','proyectos','nuevo'].forEach(p => {
+        document.getElementById(`panel-${p}`).classList.add('hidden');
+        const t = document.getElementById(`tab-${p}`);
+        if (t) t.classList.remove('active-tab');
+    });
+    document.getElementById('panel-detalle').classList.remove('hidden');
+    window.scrollTo(0, 0);
+}
+
+function cerrarDetalle() {
+    proyectoActual = null;
+    document.getElementById('panel-detalle').classList.add('hidden');
+    tab('tablero');
+    cargarProyectos();
+}
+
+function renderDetalle() {
+    const p = proyectoActual;
+    document.getElementById('det-titulo').textContent = p.nombre;
+
+    const bdgE = document.getElementById('det-estado-badge');
+    bdgE.textContent = p.estado;
+    bdgE.className = 'text-xs font-bold px-3 py-1 rounded-full ml-auto ' + clsEstado(p.estado);
+
+    // Acciones
+    const acc = document.getElementById('det-acciones');
+    let html = '';
+    if (esAdmin) {
+        if (p.estado === 'BORRADOR' || p.estado === 'PAUSADO')
+            html += `<button onclick="accionProyecto('activar')" class="bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-green-700 transition">▶ Activar</button>`;
+        if (p.estado === 'ACTIVO')
+            html += `<button onclick="accionProyecto('pausar')" class="bg-violet-100 text-violet-700 text-xs font-bold px-4 py-2 rounded-xl hover:bg-violet-200 transition">⏸ Pausar</button>`;
+        if (p.estado === 'ACTIVO' || p.estado === 'PAUSADO')
+            html += `<button onclick="accionProyecto('terminar')" class="bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-blue-800 transition">✅ Marcar terminado</button>`;
+    }
+    if (p.estado === 'TERMINADO')
+        html += `<button onclick="descargarInforme(${p.id})" class="bg-slate-700 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-slate-800 transition">📥 Descargar informe</button>`;
+    html += `<button onclick="descargarInforme(${p.id})" class="bg-slate-100 text-slate-700 text-xs font-bold px-4 py-2 rounded-xl hover:bg-slate-200 transition">📊 Excel del proyecto</button>`;
+    acc.innerHTML = html;
+
+    // Fever chart global
+    const gf = document.getElementById('det-fever-global');
+    const tareasActivas = (p.Tareas||[]).filter(t=>t.feverChart);
+    if (tareasActivas.length) {
+        gf.innerHTML = `<div class="font-bold text-slate-700 text-sm mb-3">Fever chart — restricciones activas</div>
+            ${tareasActivas.map(t => `
+            <div class="mb-3">
+                <div class="flex justify-between text-xs text-slate-500 mb-1">
+                    <span class="font-bold text-slate-700">${t.nombre}</span>
+                    <span>${badgeBuffer(t.feverChart.bufferEstado)}</span>
+                </div>
+                <div class="fever-wrap">
+                    <div class="fever-bg">
+                        <div class="zone-plan" style="width:${t.feverChart.planZonaPct}%"></div>
+                        <div class="zone-buf"  style="width:${t.feverChart.bufZonaPct}%"></div>
+                    </div>
+                    <div class="time-shade" style="width:${t.feverChart.tiempoPct}%"></div>
+                    <div class="boundary" style="left:${t.feverChart.planZonaPct}%"></div>
+                    <div class="adv-line" style="left:${t.feverChart.avancePct}%"></div>
+                </div>
+                <div class="flex justify-between text-xs text-slate-400 mt-1">
+                    <span>🟩 plan · 🟨 buffer · <span style="color:#059669;">| avance ${t.feverChart.avancePct}%</span> · sombra tiempo ${t.feverChart.tiempoPct}%</span>
+                    <span>Días: ${t.diasHabiles}d plan + ${t.bufferDias}d buffer</span>
+                </div>
+            </div>`).join('')}`;
+    } else {
+        gf.innerHTML = `<div class="text-xs text-slate-400 italic">Sin tareas de restricción activas con fever chart.</div>`;
+    }
+
+    // Tareas
+    const det = document.getElementById('det-tareas');
+    const tareas = (p.Tareas||[]).sort((a,b)=>a.orden-b.orden);
+    det.innerHTML = tareas.map(t => tarjetaTarea(t, p)).join('');
+
+    // Historial
+    renderHistorial(p.Historials || []);
+}
+
+function tarjetaTarea(t, p) {
+    const fc = t.feverChart;
+    const kitHtml = (t.KitItems||[]).map(item => `
+        <div class="flex items-center gap-2 py-1.5 border-b border-slate-100 last:border-0">
+            <div class="kit-check ${item.completado?'done':''}"
+                onclick="toggleKit(${item.id},${!item.completado})"
+                title="${item.completado?'Desmarcar':'Marcar como listo'}">
+                ${item.completado?'<svg class="w-3 h-3 text-white m-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>':''}
+            </div>
+            <span class="text-xs flex-1 ${item.completado?'line-through text-slate-400':'text-slate-700'}">${item.descripcion}</span>
+            ${item.completadoPor?`<span class="text-xs text-slate-400">${item.completadoPor}</span>`:''}
+        </div>`).join('');
+
+    const kitStatus = t.kitTotal
+        ? `<span class="text-xs font-bold ${t.kitCompleto?'text-green-700':'text-amber-700'}">Kit: ${t.kitListos}/${t.kitTotal}</span>` : '';
+
+    const tipoBadge = t.tipo === 'RESTRICCION'
+        ? `<span class="text-xs font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">Restricción</span>`
+        : t.tipo === 'ESPERA'
+        ? `<span class="text-xs font-bold bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full">En espera</span>` : '';
+
+    const activarEspera = t.tipo === 'ESPERA' && t.estado === 'ESPERA' && esAdmin
+        ? `<button onclick="activarTareaEspera(${t.id})" class="text-xs bg-green-600 text-white px-3 py-1 rounded-lg font-bold hover:bg-green-700">▶ Activar</button>` : '';
+
+    return `<div class="bg-white rounded-xl shadow border ${t.tipo==='RESTRICCION'?'border-amber-300':'border-slate-200'} overflow-hidden">
+        <div class="p-4">
+            <div class="flex justify-between items-start gap-2 flex-wrap">
+                <div>
+                    <div class="font-black text-slate-800 text-sm">${t.nombre}</div>
+                    <div class="flex items-center gap-2 mt-1">${tipoBadge}${kitStatus}${activarEspera}</div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-500">${t.diasHabiles}d plan · ${t.bufferDias}d buf</span>
+                    ${esAdmin?`<button onclick="abrirModalTarea(${JSON.stringify(t).replace(/"/g,'&quot;')})" class="text-xs bg-violet-100 text-violet-700 px-2 py-1 rounded-lg font-bold hover:bg-violet-200">✏️</button>`:''}
+                </div>
+            </div>
+
+            ${fc ? `
+            <div class="mt-3">
+                <div class="flex justify-between text-xs text-slate-400 mb-1">
+                    <span>Avance <strong class="text-slate-700">${fc.avancePct}%</strong></span>
+                    <span>Tiempo <strong class="text-slate-700">${fc.tiempoPct}%</strong> del horizonte</span>
+                </div>
+                <div class="fever-wrap">
+                    <div class="fever-bg">
+                        <div class="zone-plan" style="width:${fc.planZonaPct}%"></div>
+                        <div class="zone-buf"  style="width:${fc.bufZonaPct}%"></div>
+                    </div>
+                    <div class="time-shade" style="width:${fc.tiempoPct}%"></div>
+                    <div class="boundary" style="left:${fc.planZonaPct}%"></div>
+                    <div class="adv-line" style="left:${fc.avancePct}%"></div>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 mt-2">
+                <input type="range" min="0" max="100" value="${fc.avancePct}" step="1"
+                    class="flex-1" oninput="actualizarAvance(${t.id},this.value,this)">
+                <span class="text-xs font-bold text-violet-600 w-10 text-right" id="avlbl-${t.id}">${fc.avancePct}%</span>
+            </div>` : (t.tipo !== 'ESPERA' ? `
+            <div class="mt-2 flex items-center gap-2">
+                <input type="range" min="0" max="100" value="${t.avancePct}" step="1"
+                    class="flex-1" oninput="actualizarAvance(${t.id},this.value,this)">
+                <span class="text-xs font-bold text-violet-600 w-10 text-right" id="avlbl-${t.id}">${t.avancePct}%</span>
+            </div>` : '')}
+        </div>
+
+        ${(t.KitItems||[]).length ? `
+        <div class="border-t border-slate-100 px-4 pb-3 pt-2">
+            <div class="text-xs font-bold text-slate-500 uppercase mb-1">Kit — compuerta</div>
+            ${kitHtml}
+            <button onclick="abrirAgregarKit(${t.id})" class="text-xs text-violet-500 hover:text-violet-700 font-bold mt-1">＋ Agregar ítem al kit</button>
+        </div>` : `
+        <div class="border-t border-slate-100 px-4 py-2">
+            <button onclick="abrirAgregarKit(${t.id})" class="text-xs text-violet-500 hover:text-violet-700 font-bold">＋ Agregar kit a esta tarea</button>
+        </div>`}
+    </div>`;
+}
+
+// ─── Avance ───────────────────────────────────────────────────────────────────
+let avanceTimeout = null;
+function actualizarAvance(tareaId, valor, input) {
+    document.getElementById(`avlbl-${tareaId}`).textContent = valor + '%';
+    clearTimeout(avanceTimeout);
+    avanceTimeout = setTimeout(async () => {
+        await fetch(`/herreria/tareas/${tareaId}`, {
+            method:'PUT',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ avancePct: parseInt(valor) })
+        });
+        const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
+        proyectoActual = await res.json();
+        renderDetalle();
+    }, 800);
+}
+
+// ─── Kit ──────────────────────────────────────────────────────────────────────
+async function toggleKit(itemId, completado) {
+    await fetch(`/herreria/kit/${itemId}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ completado })
+    });
+    const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
+    proyectoActual = await res.json();
+    renderDetalle();
+}
+
+async function abrirAgregarKit(tareaId) {
+    const desc = prompt('Descripción del ítem del kit:');
+    if (!desc || !desc.trim()) return;
+    await fetch('/herreria/kit', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ tareaId, descripcion: desc.trim() })
+    });
+    const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
+    proyectoActual = await res.json();
+    renderDetalle();
+}
+
+// ─── Acciones proyecto ────────────────────────────────────────────────────────
+async function accionProyecto(accion) {
+    const motivo = accion === 'pausar' ? prompt('Motivo de la pausa (opcional):') : null;
+    await fetch(`/herreria/proyectos/${proyectoActual.id}/${accion}`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ motivo })
+    });
+    const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
+    proyectoActual = await res.json();
+    renderDetalle();
+    await cargarProyectos();
+    await cargarRestriccion();
+}
+
+async function activarTareaEspera(tareaId) {
+    await fetch(`/herreria/tareas/${tareaId}/activar`, { method:'POST' });
+    const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
+    proyectoActual = await res.json();
+    renderDetalle();
+}
+
+// ─── Historial ────────────────────────────────────────────────────────────────
+function renderHistorial(items) {
+    const cont = document.getElementById('det-historial');
+    if (!items.length) { cont.innerHTML = '<span class="italic">Sin registros.</span>'; return; }
+    cont.innerHTML = items.slice(0, 20).map(h => `
+        <div class="flex justify-between gap-2 py-1 border-b border-slate-100 last:border-0">
+            <span class="text-slate-600">${h.accion}</span>
+            <span class="text-slate-400 whitespace-nowrap">${h.usuario || '—'} · ${new Date(h.createdAt).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+        </div>`).join('');
+}
+
+function toggleHistorial() {
+    const cont = document.getElementById('det-historial');
+    const items = proyectoActual?.Historials || [];
+    if (cont.dataset.full === 'true') {
+        renderHistorial(items.slice(0,20));
+        cont.dataset.full = 'false';
+    } else {
+        cont.innerHTML = items.map(h => `
+            <div class="flex justify-between gap-2 py-1 border-b border-slate-100 last:border-0">
+                <span class="text-slate-600">${h.accion}</span>
+                <span class="text-slate-400 whitespace-nowrap">${h.usuario||'—'} · ${new Date(h.createdAt).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+            </div>`).join('');
+        cont.dataset.full = 'true';
+    }
+}
+
+async function agregarNota() {
+    const inp = document.getElementById('nota-input');
+    const nota = inp.value.trim();
+    if (!nota) return;
+    await fetch(`/herreria/proyectos/${proyectoActual.id}/nota`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ nota })
+    });
+    inp.value = '';
+    const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
+    proyectoActual = await res.json();
+    renderHistorial(proyectoActual.Historials || []);
+}
+
+// ─── Informe ──────────────────────────────────────────────────────────────────
+function descargarInforme(id) {
+    window.location.href = `/herreria/proyectos/${id}/informe`;
+}
+
+// ─── Nuevo proyecto ───────────────────────────────────────────────────────────
+let npIdx = 0;
+
+function agregarTareaForm(datos = {}) {
+    npIdx++;
+    const id = `tarea-${npIdx}`;
+    if (!npTareas.find(t => t.id === id)) {
+        npTareas.push({ id, nombre:'', tipo:'NORMAL', diasHabiles:1, kit:[] });
+    }
+    const cont = document.getElementById('np-tareas');
+    const div  = document.createElement('div');
+    div.id = id;
+    div.className = 'border-2 border-slate-200 rounded-xl p-4 space-y-3';
+    div.innerHTML = `
+        <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-slate-400 w-5">${npIdx}</span>
+            <input type="text" placeholder="Nombre de la tarea" class="flex-1 border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:border-violet-400 uppercase"
+                oninput="npSetTarea('${id}','nombre',this.value.toUpperCase())">
+            <button onclick="eliminarTareaForm('${id}')" class="text-slate-300 hover:text-red-500 text-lg leading-none">✕</button>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+            <span class="text-xs text-slate-400 font-bold">Tipo:</span>
+            <button onclick="npSelTipo('${id}','NORMAL',this)" class="tipo-opt sel-NORMAL">Normal</button>
+            <button onclick="npSelTipo('${id}','RESTRICCION',this)" class="tipo-opt">Restricción</button>
+            <button onclick="npSelTipo('${id}','ESPERA',this)" class="tipo-opt">En espera</button>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400 font-bold">Días hábiles:</span>
+            <input type="number" min="1" value="1" class="w-20 border border-slate-200 rounded-lg p-2 text-sm text-center focus:outline-none focus:border-violet-400"
+                oninput="npSetDias('${id}',this.value)">
+            <span class="text-xs text-violet-600 font-bold" id="npbuf-${id}">Buffer: 1d</span>
+            <span class="text-xs text-slate-400" id="nphor-${id}">Horizonte: 1d</span>
+        </div>
+        <div class="space-y-1" id="npkit-${id}"></div>
+        <div class="flex gap-2 flex-wrap">
+            <button onclick="npAgregarKit('${id}')" class="text-xs text-violet-500 hover:text-violet-700 font-bold">＋ Ítem al kit</button>
+            ${tareasKitSugeridas.length ? `<span class="text-xs text-slate-400">Sugeridos:</span>
+            ${tareasKitSugeridas.slice(0,3).map(s => `<button onclick="npKitSugerido('${id}','${s.descripcion}')" class="text-xs bg-violet-50 text-violet-600 border border-violet-200 px-2 py-0.5 rounded-lg hover:bg-violet-100">+ ${s.descripcion}</button>`).join('')}` : ''}
+        </div>`;
+    cont.appendChild(div);
+    recalcNpTotal();
+}
+
+function npSetTarea(id, campo, val) {
+    const t = npTareas.find(t => t.id === id);
+    if (t) t[campo] = val;
+}
+
+function npSelTipo(id, tipo, btn) {
+    const div = document.getElementById(id);
+    div.querySelectorAll('.tipo-opt').forEach(b => { b.className = 'tipo-opt'; });
+    btn.classList.add(`sel-${tipo}`);
+    npSetTarea(id, 'tipo', tipo);
+    div.className = `border-2 rounded-xl p-4 space-y-3 ${
+        tipo==='RESTRICCION'?'border-amber-300':tipo==='ESPERA'?'border-violet-300':'border-slate-200'}`;
+}
+
+function npSetDias(id, val) {
+    const dias = parseInt(val) || 1;
+    const buf  = Math.ceil(dias * 0.30);
+    npSetTarea(id, 'diasHabiles', dias);
+    document.getElementById(`npbuf-${id}`).textContent = `Buffer: ${buf}d`;
+    document.getElementById(`nphor-${id}`).textContent = `Horizonte: ${dias+buf}d`;
+    recalcNpTotal();
+}
+
+function npAgregarKit(tareaId) {
+    const desc = prompt('Ítem del kit:');
+    if (!desc || !desc.trim()) return;
+    const t = npTareas.find(t => t.id === tareaId);
+    if (t) { t.kit = t.kit || []; t.kit.push({ descripcion: desc.trim() }); }
+    const cont = document.getElementById(`npkit-${tareaId}`);
+    const d = document.createElement('div');
+    d.className = 'text-xs text-slate-600 bg-slate-50 px-2 py-1 rounded-lg flex items-center gap-2';
+    d.innerHTML = `<span class="text-green-500">▣</span> ${desc.trim()}`;
+    cont.appendChild(d);
+}
+
+function npKitSugerido(tareaId, desc) {
+    const t = npTareas.find(t => t.id === tareaId);
+    if (t) { t.kit = t.kit || []; t.kit.push({ descripcion: desc, esSugerida: true }); }
+    const cont = document.getElementById(`npkit-${tareaId}`);
+    const d = document.createElement('div');
+    d.className = 'text-xs text-violet-700 bg-violet-50 px-2 py-1 rounded-lg flex items-center gap-2';
+    d.innerHTML = `<span>⭐</span> ${desc}`;
+    cont.appendChild(d);
+}
+
+function eliminarTareaForm(id) {
+    npTareas = npTareas.filter(t => t.id !== id);
+    const el = document.getElementById(id);
+    if (el) el.remove();
+    recalcNpTotal();
+}
+
+function recalcNpTotal() {
+    const diasInputs = document.querySelectorAll('#np-tareas input[type=number]');
+    let plan = 0;
+    diasInputs.forEach(i => { plan += parseInt(i.value) || 0; });
+    const buf = Math.ceil(plan * 0.30);
+    document.getElementById('np-dias-plan').textContent  = plan;
+    document.getElementById('np-dias-buf').textContent   = buf;
+    document.getElementById('np-dias-total').textContent = plan + buf;
+}
+
+async function guardarProyecto(estado) {
+    const nombre = document.getElementById('np-nombre').value.trim().toUpperCase();
+    if (!nombre) { alert('El nombre del proyecto es obligatorio.'); return; }
+
+    // Recolectar tareas del DOM
+    const tareasDOM = [];
+    document.querySelectorAll('#np-tareas > div[id^="tarea-"]').forEach(div => {
+        const npT = npTareas.find(t => t.id === div.id);
+        if (!npT) return;
+        const nombreInp = div.querySelector('input[type=text]');
+        const diasInp   = div.querySelector('input[type=number]');
+        const tipoBtns  = div.querySelectorAll('.tipo-opt');
+        let tipo = 'NORMAL';
+        tipoBtns.forEach(b => {
+            if (b.classList.contains('sel-RESTRICCION')) tipo = 'RESTRICCION';
+            else if (b.classList.contains('sel-ESPERA'))    tipo = 'ESPERA';
+        });
+        tareasDOM.push({
+            nombre:      (nombreInp?.value || '').trim().toUpperCase() || `Tarea ${tareasDOM.length+1}`,
+            tipo,
+            diasHabiles: parseInt(diasInp?.value) || 1,
+            kit:         npT.kit || []
+        });
+    });
+
+    const body = {
+        nombre,
+        cliente:     document.getElementById('np-cliente').value.trim(),
+        responsable: document.getElementById('np-responsable').value.trim(),
+        notas:       document.getElementById('np-notas').value.trim(),
+        tareas:      tareasDOM
+    };
+
+    const res = await fetch('/herreria/proyectos', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+    });
+    const nuevo = await res.json();
+
+    if (estado === 'ACTIVO') {
+        await fetch(`/herreria/proyectos/${nuevo.id}/activar`, { method:'POST' });
+    }
+
+    // Reset form
+    document.getElementById('np-nombre').value = '';
+    document.getElementById('np-cliente').value = '';
+    document.getElementById('np-responsable').value = '';
+    document.getElementById('np-notas').value = '';
+    document.getElementById('np-tareas').innerHTML = '';
+    npTareas = []; npIdx = 0;
+    agregarTareaForm();
+
+    await cargarProyectos();
+    await cargarRestriccion();
+    await abrirDetalle(nuevo.id);
+}
+
+// ─── Modal editar tarea ───────────────────────────────────────────────────────
+function abrirModalTarea(t) {
+    document.getElementById('mt-id').value     = t.id;
+    document.getElementById('mt-nombre').value = t.nombre;
+    document.getElementById('mt-dias').value   = t.diasHabiles;
+    document.getElementById('mt-avance').value = t.avancePct;
+    document.getElementById('mt-avance-num').textContent = t.avancePct + '%';
+    mtCalcBuf();
+    document.getElementById('modal-tarea').classList.remove('hidden');
+}
+
+function cerrarModalTarea() { document.getElementById('modal-tarea').classList.add('hidden'); }
+
+function mtCalcBuf() {
+    const dias = parseInt(document.getElementById('mt-dias').value) || 0;
+    document.getElementById('mt-buf').value = Math.ceil(dias * 0.30) + ' días';
+}
+
+async function guardarTarea() {
+    const id     = document.getElementById('mt-id').value;
+    const nombre = document.getElementById('mt-nombre').value.trim().toUpperCase();
+    const dias   = parseInt(document.getElementById('mt-dias').value);
+    const avance = parseInt(document.getElementById('mt-avance').value);
+    await fetch(`/herreria/tareas/${id}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ nombre, diasHabiles: dias, avancePct: avance })
+    });
+    cerrarModalTarea();
+    const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
+    proyectoActual = await res.json();
+    renderDetalle();
+    await cargarProyectos();
+}
+
+// ─── Helpers UI ───────────────────────────────────────────────────────────────
+function badgeBuffer(estado) {
+    const map = {
+        CRITICO: 'bg-red-100 text-red-800',
+        ALERTA:  'bg-yellow-100 text-yellow-800',
+        OK:      'bg-green-100 text-green-800',
+    };
+    const label = { CRITICO:'🔴 Crítico', ALERTA:'⚠️ Alerta', OK:'✅ OK' };
+    const cls = map[estado] || map.OK;
+    return `<span class="text-xs font-bold px-2 py-0.5 rounded-full ${cls}">${label[estado] || '✅ OK'}</span>`;
+}
+
+function badgeEstado(e) {
+    const map = {
+        BORRADOR:'bg-slate-100 text-slate-600',
+        ACTIVO:  'bg-green-100 text-green-800',
+        PAUSADO: 'bg-violet-100 text-violet-700',
+        TERMINADO:'bg-blue-100 text-blue-800'
+    };
+    return `<span class="text-xs font-bold px-2 py-0.5 rounded-full ${map[e]||'bg-slate-100 text-slate-600'}">${e}</span>`;
+}
+
+function clsEstado(e) {
+    return {
+        BORRADOR:'bg-slate-100 text-slate-600',
+        ACTIVO:  'bg-green-100 text-green-800',
+        PAUSADO: 'bg-violet-100 text-violet-700',
+        TERMINADO:'bg-blue-100 text-blue-800'
+    }[e] || 'bg-slate-100 text-slate-600';
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') cerrarModalTarea();
+});
+</script>
+</body>
+</html>
