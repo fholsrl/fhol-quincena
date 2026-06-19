@@ -26,6 +26,7 @@
         .btn-modulo:active { transform: scale(0.98); }
         .btn-personal  { background: #1e3a8a; color: white; }
         .btn-logistica { background: #ea580c; color: white; }
+        .btn-herreria { background: #7c3aed; color: white; }
         .btn-volver { background: none; border: none; color: #94a3b8; font-size: 12px; cursor: pointer; margin-top: 8px; text-decoration: underline; }
     </style>
 </head>
@@ -109,6 +110,9 @@
             }
             if (modulos.includes('LOGISTICA')) {
                 contenedor.innerHTML += `<button class="btn-modulo btn-logistica" onclick="ir('/logistica.html')">📦 LOGÍSTICA</button>`;
+            }
+            if (modulos.includes('HERRERIA')) {
+                contenedor.innerHTML += `<button class="btn-modulo btn-herreria" onclick="ir('/herreria.html')">🔩 HERRERÍA</button>`;
             }
             if (!modulos.length) {
                 contenedor.innerHTML = '<p style="color:#dc2626;font-size:13px">Sin módulos asignados. Contactá al administrador.</p>';
