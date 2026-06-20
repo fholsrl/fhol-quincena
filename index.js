@@ -6,10 +6,12 @@ const { Op } = require('sequelize');
 const { addDays, startOfMonth, endOfMonth } = require('date-fns');
 const ExcelJS = require('exceljs');
 const { sequelize: dbLogistica } = require('./database_logistica');
+const rutasHerreria = require('./rutas_herreria');
 
 const app = express();
 app.use(express.json());
 app.use(express.static('public'));
+app.use('/herreria', rutasHerreria);
 
 // 1. Configurar la sesión
 app.use(session({
