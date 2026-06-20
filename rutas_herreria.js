@@ -36,8 +36,11 @@ function diasHabilesDesde(fecha) {
     return count;
 }
 
-// Calcula el buffer correcto: ceil(dias * 0.30)
-function calcBuf(dias) { return Math.ceil(dias * 0.30); }
+// Calcula el buffer correcto: ceil(dias * 0.30) — solo aplica a fase EJECUCION
+function calcBuf(dias, fase = 'EJECUCION') {
+    if (fase === 'PRELIMINAR') return 0;
+    return Math.ceil(dias * 0.30);
+}
 
 // Registra un cambio en el historial del proyecto
 async function log(proyectoId, accion, usuario, datos = null) {
@@ -89,11 +92,13 @@ router.post('/proyectos', proteger, async (req, res) => {
         if (tareas && tareas.length) {
             for (let i = 0; i < tareas.length; i++) {
                 const t = tareas[i];
-                const buf = calcBuf(t.diasHabiles || 1);
+                const fase = t.fase === 'PRELIMINAR' ? 'PRELIMINAR' : 'EJECUCION';
+                const buf  = calcBuf(t.diasHabiles || 1, fase);
                 const tarea = await Tarea.create({
                     proyectoId: p.id,
                     nombre: t.nombre,
-                    tipo:   t.tipo   || 'NORMAL',
+                    fase,
+                    tipo:   fase === 'PRELIMINAR' ? 'NORMAL' : (t.tipo || 'NORMAL'),
                     estado: t.tipo === 'ESPERA' ? 'ESPERA' : 'PENDIENTE',
                     diasHabiles: t.diasHabiles || 1,
                     bufferDias:  buf,
@@ -149,6 +154,9 @@ router.post('/proyectos/:id/activar', proteger, async (req, res) => {
         await p.save();
 
         // Activar tareas que NO están en espera, en orden
+        // Preliminares y ejecución corren en cursores separados porque preliminares
+        // (orden de compra → adelanto) no bloquea el inicio de ejecución necesariamente,
+        // pero por simplicidad inicial se respeta el orden cargado.
         let cursor = new Date();
         for (const t of p.Tareas.sort((a, b) => a.orden - b.orden)) {
             if (t.tipo === 'ESPERA') continue;
@@ -156,7 +164,8 @@ router.post('/proyectos/:id/activar', proteger, async (req, res) => {
                 t.activadaEn = cursor;
                 t.estado     = 'EN_PROCESO';
                 await t.save();
-                cursor = sumarDiasHabiles(cursor, t.diasHabiles + t.bufferDias);
+                const avance = t.fase === 'PRELIMINAR' ? t.diasHabiles : (t.diasHabiles + t.bufferDias);
+                cursor = sumarDiasHabiles(cursor, avance);
             }
         }
         await log(p.id, 'Proyecto activado', req.session.user.username);
@@ -197,11 +206,13 @@ router.post('/tareas', proteger, async (req, res) => {
     try {
         if (req.session.user.rol !== 'admin')
             return res.status(403).json({ error: 'Solo el jefe puede agregar tareas' });
-        const { proyectoId, nombre, tipo, diasHabiles, kit } = req.body;
-        const buf = calcBuf(diasHabiles || 1);
+        const { proyectoId, nombre, tipo, diasHabiles, kit, fase } = req.body;
+        const faseFinal = fase === 'PRELIMINAR' ? 'PRELIMINAR' : 'EJECUCION';
+        const buf = calcBuf(diasHabiles || 1, faseFinal);
         const maxOrden = await Tarea.max('orden', { where: { proyectoId } }) || 0;
         const t = await Tarea.create({
-            proyectoId, nombre, tipo: tipo || 'NORMAL',
+            proyectoId, nombre, fase: faseFinal,
+            tipo: faseFinal === 'PRELIMINAR' ? 'NORMAL' : (tipo || 'NORMAL'),
             estado: tipo === 'ESPERA' ? 'ESPERA' : 'PENDIENTE',
             diasHabiles: diasHabiles || 1, bufferDias: buf,
             orden: maxOrden + 1
@@ -229,13 +240,27 @@ router.put('/tareas/:id', proteger, async (req, res) => {
             // El jefe puede cambiar todo
             const { nombre, tipo, diasHabiles, estado, notas } = req.body;
             if (nombre)      t.nombre      = nombre;
-            if (tipo)        t.tipo        = tipo;
-            if (diasHabiles) { t.diasHabiles = diasHabiles; t.bufferDias = calcBuf(diasHabiles); }
+            if (tipo && t.fase !== 'PRELIMINAR') t.tipo = tipo;
+            if (diasHabiles) { t.diasHabiles = diasHabiles; t.bufferDias = calcBuf(diasHabiles, t.fase); }
             if (estado)      t.estado      = estado;
         }
 
-        // Avance lo puede cambiar el jefe o supervisor
-        if (req.body.avancePct !== undefined) {
+        // Marcar tarea PRELIMINAR como hecha — fija fecha de cierre real, sin buffer/fever
+        if (req.body.marcarHecha === true && t.fase === 'PRELIMINAR') {
+            t.estado      = 'COMPLETADA';
+            t.avancePct   = 100;
+            t.cerradaEn   = new Date();
+            t.cerradaPor  = req.session.user.username;
+        }
+        if (req.body.marcarHecha === false && t.fase === 'PRELIMINAR') {
+            t.estado      = 'PENDIENTE';
+            t.avancePct   = 0;
+            t.cerradaEn   = null;
+            t.cerradaPor  = null;
+        }
+
+        // Avance lo puede cambiar el jefe o supervisor — solo aplica a EJECUCION
+        if (req.body.avancePct !== undefined && t.fase !== 'PRELIMINAR') {
             t.avancePct = parseInt(req.body.avancePct);
             if (t.avancePct >= 100) {
                 t.avancePct   = 100;
@@ -244,15 +269,18 @@ router.put('/tareas/:id', proteger, async (req, res) => {
             }
         }
 
-        // Días hábiles consumidos — actualizar
-        if (t.activadaEn) {
+        // Días hábiles consumidos — actualizar (solo EJECUCION usa fever chart)
+        if (t.activadaEn && t.fase !== 'PRELIMINAR') {
             t.diasHabilesConsumidos = diasHabilesDesde(t.activadaEn);
         }
 
         await t.save();
         await recalcularTotales(t.proyectoId);
-        await log(t.proyectoId, `Tarea "${t.nombre}" actualizada`, req.session.user.username,
-            { anterior, nuevo: { avancePct: t.avancePct, estado: t.estado } });
+        const accionTxt = req.body.marcarHecha !== undefined
+            ? `Preliminar "${t.nombre}" marcada como ${req.body.marcarHecha ? 'HECHA' : 'pendiente'}`
+            : `Tarea "${t.nombre}" actualizada`;
+        await log(t.proyectoId, accionTxt, req.session.user.username,
+            { anterior, nuevo: { avancePct: t.avancePct, estado: t.estado, cerradaEn: t.cerradaEn } });
         res.json(t);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -604,8 +632,12 @@ router.get('/proyectos/:id/informe', proteger, async (req, res) => {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function recalcularTotales(proyectoId) {
     const tareas = await Tarea.findAll({ where: { proyectoId } });
+    // Días totales: suma de TODAS las fases (preliminar + ejecución)
     const dias = tareas.reduce((s, t) => s + (t.diasHabiles || 0), 0);
-    const buf  = tareas.reduce((s, t) => s + (t.bufferDias  || 0), 0);
+    // Buffer: SOLO de tareas de ejecución — preliminares no tiene buffer
+    const buf  = tareas
+        .filter(t => t.fase !== 'PRELIMINAR')
+        .reduce((s, t) => s + (t.bufferDias || 0), 0);
     await Proyecto.update(
         { diasHabilesTotales: dias, bufferDias: buf },
         { where: { id: proyectoId } }
@@ -616,9 +648,9 @@ function enriquecerProyecto(p) {
     const obj = p.toJSON();
     const tareas = obj.Tareas || [];
 
-    // Calcular fever chart por tarea activa
+    // Calcular fever chart SOLO para tareas de EJECUCION — preliminares no usa TOC
     tareas.forEach(t => {
-        if (!t.activadaEn || t.estado === 'ESPERA' || t.estado === 'PENDIENTE') {
+        if (t.fase === 'PRELIMINAR' || !t.activadaEn || t.estado === 'ESPERA' || t.estado === 'PENDIENTE') {
             t.feverChart = null; return;
         }
         const horizonte  = t.diasHabiles + t.bufferDias;
@@ -634,20 +666,24 @@ function enriquecerProyecto(p) {
         t.feverChart = { tiempoPct, avancePct, diff, planZonaPct, bufZonaPct, bufferEstado };
     });
 
-    // Estado general del buffer del proyecto
+    // Estado general del buffer del proyecto — solo considera EJECUCION
     const tareasActivas = tareas.filter(t => t.feverChart);
     let estadoProyecto = 'OK';
     if (tareasActivas.some(t => t.feverChart.bufferEstado === 'CRITICO')) estadoProyecto = 'CRITICO';
     else if (tareasActivas.some(t => t.feverChart.bufferEstado === 'ALERTA')) estadoProyecto = 'ALERTA';
     obj.bufferEstado = estadoProyecto;
 
-    // Kit completo por tarea
+    // Kit completo por tarea (preliminares no tiene kit, queda true por defecto)
     tareas.forEach(t => {
         if (!t.KitItems) { t.kitCompleto = true; return; }
         t.kitCompleto = t.KitItems.every(k => k.completado);
         t.kitTotal    = t.KitItems.length;
         t.kitListos   = t.KitItems.filter(k => k.completado).length;
     });
+
+    // Separar tareas por fase para que el frontend las agrupe fácil
+    obj.tareasPreliminares = tareas.filter(t => t.fase === 'PRELIMINAR').sort((a,b)=>a.orden-b.orden);
+    obj.tareasEjecucion    = tareas.filter(t => t.fase !== 'PRELIMINAR').sort((a,b)=>a.orden-b.orden);
 
     return obj;
 }

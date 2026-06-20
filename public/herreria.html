@@ -474,13 +474,68 @@ function renderDetalle() {
         gf.innerHTML = `<div class="text-xs text-slate-400 italic">Sin tareas de restricción activas con fever chart.</div>`;
     }
 
-    // Tareas
+    // Tareas — separadas en Preliminares y Ejecución
     const det = document.getElementById('det-tareas');
-    const tareas = (p.Tareas||[]).sort((a,b)=>a.orden-b.orden);
-    det.innerHTML = tareas.map(t => tarjetaTarea(t, p)).join('');
+    const preliminares = (p.tareasPreliminares || (p.Tareas||[]).filter(t=>t.fase==='PRELIMINAR')).sort((a,b)=>a.orden-b.orden);
+    const ejecucion     = (p.tareasEjecucion    || (p.Tareas||[]).filter(t=>t.fase!=='PRELIMINAR')).sort((a,b)=>a.orden-b.orden);
+
+    let htmlTareas = '';
+
+    if (preliminares.length) {
+        const hechas = preliminares.filter(t => t.estado === 'COMPLETADA').length;
+        htmlTareas += `
+        <div class="bg-white rounded-xl shadow border border-slate-200">
+            <div class="p-3 border-b border-slate-100 flex justify-between items-center">
+                <span class="font-black text-slate-700 text-sm">📝 Preliminares</span>
+                <span class="text-xs text-slate-400 font-bold">${hechas}/${preliminares.length} completadas · sin buffer</span>
+            </div>
+            <div class="divide-y divide-slate-100">
+                ${preliminares.map(t => tarjetaPreliminar(t)).join('')}
+            </div>
+        </div>`;
+    }
+
+    if (ejecucion.length) {
+        htmlTareas += `
+        <div class="font-black text-slate-700 text-sm mt-4 mb-1 flex items-center gap-2">
+            🔧 Ejecución <span class="text-xs text-slate-400 font-normal">— con buffer TOC y fever chart</span>
+        </div>
+        <div class="space-y-3">
+            ${ejecucion.map(t => tarjetaTarea(t, p)).join('')}
+        </div>`;
+    }
+
+    det.innerHTML = htmlTareas || `<div class="text-xs text-slate-400 italic p-4">Sin tareas cargadas.</div>`;
 
     // Historial
     renderHistorial(p.Historials || []);
+}
+
+// ─── Tarjeta simple para tareas PRELIMINAR (sin buffer, sin fever chart) ──────
+function tarjetaPreliminar(t) {
+    const hecha = t.estado === 'COMPLETADA';
+    const fechaCierre = t.cerradaEn
+        ? new Date(t.cerradaEn).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' })
+        : null;
+    return `<div class="flex items-center gap-3 p-3 ${hecha?'bg-green-50':''}">
+        <div class="kit-check ${hecha?'done':''}" onclick="marcarPreliminar(${t.id}, ${!hecha})">
+            ${hecha?'<svg class="w-3 h-3 text-white m-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>':''}
+        </div>
+        <span class="flex-1 text-sm ${hecha?'line-through text-slate-400':'text-slate-700 font-medium'}">${t.nombre}</span>
+        ${hecha
+            ? `<span class="text-xs text-green-700 font-bold">✓ Cerrada el ${fechaCierre}${t.cerradaPor?` · ${t.cerradaPor}`:''}</span>`
+            : `<span class="text-xs text-slate-400">${t.diasHabiles}d estimados</span>`}
+    </div>`;
+}
+
+async function marcarPreliminar(tareaId, marcar) {
+    await fetch(`/herreria/tareas/${tareaId}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ marcarHecha: marcar })
+    });
+    const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
+    proyectoActual = await res.json();
+    renderDetalle();
 }
 
 function tarjetaTarea(t, p) {
@@ -674,7 +729,7 @@ function agregarTareaForm(datos = {}) {
     npIdx++;
     const id = `tarea-${npIdx}`;
     if (!npTareas.find(t => t.id === id)) {
-        npTareas.push({ id, nombre:'', tipo:'NORMAL', diasHabiles:1, kit:[] });
+        npTareas.push({ id, nombre:'', fase:'EJECUCION', tipo:'NORMAL', diasHabiles:1, kit:[] });
     }
     const cont = document.getElementById('np-tareas');
     const div  = document.createElement('div');
@@ -688,6 +743,12 @@ function agregarTareaForm(datos = {}) {
             <button onclick="eliminarTareaForm('${id}')" class="text-slate-300 hover:text-red-500 text-lg leading-none">✕</button>
         </div>
         <div class="flex flex-wrap gap-2 items-center">
+            <span class="text-xs text-slate-400 font-bold">Fase:</span>
+            <button onclick="npSelFase('${id}','PRELIMINAR',this)" class="tipo-opt">📝 Preliminar</button>
+            <button onclick="npSelFase('${id}','EJECUCION',this)" class="tipo-opt sel-NORMAL">🔧 Ejecución</button>
+            <span class="text-xs text-slate-400 italic ml-1" id="npfaseinfo-${id}">Ejecución usa buffer TOC del 30%</span>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center" id="nptipowrap-${id}">
             <span class="text-xs text-slate-400 font-bold">Tipo:</span>
             <button onclick="npSelTipo('${id}','NORMAL',this)" class="tipo-opt sel-NORMAL">Normal</button>
             <button onclick="npSelTipo('${id}','RESTRICCION',this)" class="tipo-opt">Restricción</button>
@@ -701,7 +762,7 @@ function agregarTareaForm(datos = {}) {
             <span class="text-xs text-slate-400" id="nphor-${id}">Horizonte: 1d</span>
         </div>
         <div class="space-y-1" id="npkit-${id}"></div>
-        <div class="flex gap-2 flex-wrap">
+        <div class="flex gap-2 flex-wrap" id="npkitbtn-${id}">
             <button onclick="npAgregarKit('${id}')" class="text-xs text-violet-500 hover:text-violet-700 font-bold">＋ Ítem al kit</button>
             ${tareasKitSugeridas.length ? `<span class="text-xs text-slate-400">Sugeridos:</span>
             ${tareasKitSugeridas.slice(0,3).map(s => `<button onclick="npKitSugerido('${id}','${s.descripcion}')" class="text-xs bg-violet-50 text-violet-600 border border-violet-200 px-2 py-0.5 rounded-lg hover:bg-violet-100">+ ${s.descripcion}</button>`).join('')}` : ''}
@@ -717,19 +778,52 @@ function npSetTarea(id, campo, val) {
 
 function npSelTipo(id, tipo, btn) {
     const div = document.getElementById(id);
-    div.querySelectorAll('.tipo-opt').forEach(b => { b.className = 'tipo-opt'; });
+    div.querySelectorAll('#nptipowrap-' + id + ' .tipo-opt').forEach(b => { b.className = 'tipo-opt'; });
     btn.classList.add(`sel-${tipo}`);
     npSetTarea(id, 'tipo', tipo);
-    div.className = `border-2 rounded-xl p-4 space-y-3 ${
-        tipo==='RESTRICCION'?'border-amber-300':tipo==='ESPERA'?'border-violet-300':'border-slate-200'}`;
+    if (npTareas.find(t => t.id === id)?.fase !== 'PRELIMINAR') {
+        div.className = `border-2 rounded-xl p-4 space-y-3 ${
+            tipo==='RESTRICCION'?'border-amber-300':tipo==='ESPERA'?'border-violet-300':'border-slate-200'}`;
+    }
+}
+
+function npSelFase(id, fase, btn) {
+    const div = document.getElementById(id);
+    div.querySelectorAll('.tipo-opt').forEach(b => {
+        if (b.textContent.includes('Preliminar') || b.textContent.includes('Ejecución')) {
+            b.classList.remove('sel-NORMAL');
+        }
+    });
+    btn.classList.add('sel-NORMAL');
+    npSetTarea(id, 'fase', fase);
+
+    const tipoWrap = document.getElementById(`nptipowrap-${id}`);
+    const kitBtn   = document.getElementById(`npkitbtn-${id}`);
+    const info     = document.getElementById(`npfaseinfo-${id}`);
+
+    if (fase === 'PRELIMINAR') {
+        tipoWrap.style.display = 'none';
+        kitBtn.style.display   = 'none';
+        info.textContent = 'Preliminar: sin buffer, solo registra fecha de cierre';
+        div.className = 'border-2 border-blue-200 rounded-xl p-4 space-y-3';
+        npSetDias(id, document.querySelector(`#${id} input[type=number]`).value);
+    } else {
+        tipoWrap.style.display = 'flex';
+        kitBtn.style.display   = 'flex';
+        info.textContent = 'Ejecución usa buffer TOC del 30%';
+        div.className = 'border-2 border-slate-200 rounded-xl p-4 space-y-3';
+        npSetDias(id, document.querySelector(`#${id} input[type=number]`).value);
+    }
 }
 
 function npSetDias(id, val) {
     const dias = parseInt(val) || 1;
-    const buf  = Math.ceil(dias * 0.30);
+    const t = npTareas.find(t => t.id === id);
+    const esPreliminar = t?.fase === 'PRELIMINAR';
+    const buf = esPreliminar ? 0 : Math.ceil(dias * 0.30);
     npSetTarea(id, 'diasHabiles', dias);
-    document.getElementById(`npbuf-${id}`).textContent = `Buffer: ${buf}d`;
-    document.getElementById(`nphor-${id}`).textContent = `Horizonte: ${dias+buf}d`;
+    document.getElementById(`npbuf-${id}`).textContent = esPreliminar ? 'Sin buffer (preliminar)' : `Buffer: ${buf}d`;
+    document.getElementById(`nphor-${id}`).textContent = esPreliminar ? `Solo ${dias}d estimados` : `Horizonte: ${dias+buf}d`;
     recalcNpTotal();
 }
 
@@ -763,10 +857,12 @@ function eliminarTareaForm(id) {
 }
 
 function recalcNpTotal() {
-    const diasInputs = document.querySelectorAll('#np-tareas input[type=number]');
-    let plan = 0;
-    diasInputs.forEach(i => { plan += parseInt(i.value) || 0; });
-    const buf = Math.ceil(plan * 0.30);
+    let plan = 0, buf = 0;
+    npTareas.forEach(t => {
+        const dias = t.diasHabiles || 0;
+        plan += dias;
+        if (t.fase !== 'PRELIMINAR') buf += Math.ceil(dias * 0.30);
+    });
     document.getElementById('np-dias-plan').textContent  = plan;
     document.getElementById('np-dias-buf').textContent   = buf;
     document.getElementById('np-dias-total').textContent = plan + buf;
@@ -776,22 +872,24 @@ async function guardarProyecto(estado) {
     const nombre = document.getElementById('np-nombre').value.trim().toUpperCase();
     if (!nombre) { alert('El nombre del proyecto es obligatorio.'); return; }
 
-    // Recolectar tareas del DOM
+    // Recolectar tareas del DOM — la fase ya está guardada en npTareas (estado JS)
     const tareasDOM = [];
     document.querySelectorAll('#np-tareas > div[id^="tarea-"]').forEach(div => {
         const npT = npTareas.find(t => t.id === div.id);
         if (!npT) return;
         const nombreInp = div.querySelector('input[type=text]');
         const diasInp   = div.querySelector('input[type=number]');
-        const tipoBtns  = div.querySelectorAll('.tipo-opt');
+        const fase = npT.fase || 'EJECUCION';
         let tipo = 'NORMAL';
-        tipoBtns.forEach(b => {
-            if (b.classList.contains('sel-RESTRICCION')) tipo = 'RESTRICCION';
-            else if (b.classList.contains('sel-ESPERA'))    tipo = 'ESPERA';
-        });
+        if (fase !== 'PRELIMINAR') {
+            div.querySelectorAll('#nptipowrap-' + npT.id + ' .tipo-opt').forEach(b => {
+                if (b.classList.contains('sel-RESTRICCION')) tipo = 'RESTRICCION';
+                else if (b.classList.contains('sel-ESPERA'))   tipo = 'ESPERA';
+            });
+        }
         tareasDOM.push({
             nombre:      (nombreInp?.value || '').trim().toUpperCase() || `Tarea ${tareasDOM.length+1}`,
-            tipo,
+            fase, tipo,
             diasHabiles: parseInt(diasInp?.value) || 1,
             kit:         npT.kit || []
         });

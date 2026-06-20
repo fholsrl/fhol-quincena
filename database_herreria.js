@@ -24,8 +24,10 @@ const Proyecto = sequelize.define('ProyectoHerreria', {
 // ── Tarea ─────────────────────────────────────────────────────────────────────
 const Tarea = sequelize.define('TareaHerreria', {
     nombre:       { type: DataTypes.STRING,  allowNull: false },
+    fase:         { type: DataTypes.STRING,  defaultValue: 'EJECUCION' },
+    // PRELIMINAR | EJECUCION — preliminares no usa buffer ni fever chart
     tipo:         { type: DataTypes.STRING,  defaultValue: 'NORMAL' },
-    // NORMAL | RESTRICCION | ESPERA
+    // NORMAL | RESTRICCION | ESPERA  (solo aplica en fase EJECUCION)
     estado:       { type: DataTypes.STRING,  defaultValue: 'PENDIENTE' },
     // PENDIENTE | EN_PROCESO | COMPLETADA | PAUSADA | ESPERA
     diasHabiles:  { type: DataTypes.INTEGER, defaultValue: 1  },
@@ -34,6 +36,9 @@ const Tarea = sequelize.define('TareaHerreria', {
     orden:        { type: DataTypes.INTEGER, defaultValue: 0  },
     activadaEn:   { type: DataTypes.DATE,    allowNull: true  },
     completadaEn: { type: DataTypes.DATE,    allowNull: true  },
+    // Fecha de cierre real para tareas PRELIMINAR (queda fija al marcar como hecha)
+    cerradaEn:    { type: DataTypes.DATE,    allowNull: true  },
+    cerradaPor:   { type: DataTypes.STRING,  allowNull: true  },
     diasHabilesConsumidos: { type: DataTypes.INTEGER, defaultValue: 0 },
 }, { tableName: 'TareasHerreria', timestamps: true });
 
