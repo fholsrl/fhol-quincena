@@ -11,7 +11,6 @@ const rutasHerreria = require('./rutas_herreria');
 const app = express();
 app.use(express.json());
 app.use(express.static('public'));
-app.use('/herreria', rutasHerreria);
 
 // 1. Configurar la sesión
 app.use(session({
@@ -20,6 +19,7 @@ app.use(session({
     saveUninitialized: false,
     cookie: { secure: false } // Ponelo en false para trabajar en localhost
 }));
+app.use('/herreria', rutasHerreria);
 
 // 2. DEFINIR LA FUNCIÓN PROTEGER (Importante que esté ACÁ)
 const proteger = (req, res, next) => {
