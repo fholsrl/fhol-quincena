@@ -1,5 +1,6 @@
 const express = require('express');
-const session = require('express-session'); // <-- ESTA ES LA LÍNEA QUE FALTA
+const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session);
 const { sequelize, Empleado, Hora, Usuario } = require('./database');
 const { obtenerCorteQuincena } = require('./logicafechas');
 const { Op } = require('sequelize');
@@ -12,12 +13,23 @@ const app = express();
 app.use(express.json());
 app.use(express.static('public'));
 
-// 1. Configurar la sesión
+// 1. Configurar la sesión — guardada en Postgres (Supabase), NO en memoria.
+//    Así la sesión sobrevive a reinicios/redeploys del servidor en Render.
+//    La tabla "session" se crea sola la primera vez (createTableIfMissing: true).
 app.use(session({
+    store: new pgSession({
+        conString: process.env.DATABASE_URL || 'postgresql://postgres:FholMarzo2026@db.qqzmbnpwmmxvjxmixteb.supabase.co:5432/postgres',
+        tableName: 'session',
+        createTableIfMissing: true,
+        ssl: { rejectUnauthorized: false }
+    }),
     secret: 'fhol-secreto-ultra-seguro',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false } // Ponelo en false para trabajar en localhost
+    cookie: {
+        secure: false,
+        maxAge: 1000 * 60 * 60 * 24 * 7 // 7 días — la sesión dura una semana sin volver a loguearse
+    }
 }));
 app.use('/herreria', rutasHerreria);
 
