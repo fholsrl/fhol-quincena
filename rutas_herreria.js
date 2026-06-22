@@ -688,4 +688,107 @@ function enriquecerProyecto(p) {
     return obj;
 }
 
+// ── CALENDARIO (solo fase EJECUCION) ─────────────────────────────────────────
+// GET /herreria/calendario?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+// Devuelve cada tarea de ejecución con su rango de fechas real (calculado desde
+// activadaEn + días) para poder pintarla en el calendario mensual/semanal.
+router.get('/calendario', proteger, async (req, res) => {
+    try {
+        const proyectos = await Proyecto.findAll({
+            where: { estado: { [Op.in]: ['ACTIVO', 'PAUSADO', 'TERMINADO'] } },
+            include: [{ model: Tarea, where: { fase: { [Op.ne]: 'PRELIMINAR' } }, required: false }]
+        });
+
+        const eventos = [];
+        proyectos.forEach((p, idx) => {
+            (p.Tareas || []).forEach(t => {
+                if (!t.activadaEn) return; // sin fecha de inicio real, no se puede ubicar en calendario
+                const inicio = new Date(t.activadaEn);
+                // Fin = inicio + días de plan (sin contar el buffer, que es margen no trabajo)
+                const fin = sumarDiasHabiles(inicio, Math.max(0, t.diasHabiles - 1));
+                eventos.push({
+                    proyectoId: p.id,
+                    proyectoNombre: p.nombre,
+                    tareaId: t.id,
+                    tareaNombre: t.nombre,
+                    inicio: inicio.toISOString().split('T')[0],
+                    fin: fin.toISOString().split('T')[0],
+                    estado: t.estado,
+                    avancePct: t.avancePct,
+                    colorIdx: idx % 8 // para asignar color consistente por proyecto en el frontend
+                });
+            });
+        });
+
+        res.json(eventos);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /herreria/calendario/excel?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+// Exporta el calendario del rango pedido como planilla Excel
+router.get('/calendario/excel', proteger, async (req, res) => {
+    try {
+        const proyectos = await Proyecto.findAll({
+            where: { estado: { [Op.in]: ['ACTIVO', 'PAUSADO', 'TERMINADO'] } },
+            include: [{ model: Tarea, where: { fase: { [Op.ne]: 'PRELIMINAR' } }, required: false }]
+        });
+
+        const eventos = [];
+        proyectos.forEach(p => {
+            (p.Tareas || []).forEach(t => {
+                if (!t.activadaEn) return;
+                const inicio = new Date(t.activadaEn);
+                const fin = sumarDiasHabiles(inicio, Math.max(0, t.diasHabiles - 1));
+                eventos.push({
+                    proyecto: p.nombre, tarea: t.nombre, inicio, fin,
+                    estado: t.estado, avance: t.avancePct
+                });
+            });
+        });
+        eventos.sort((a, b) => a.inicio - b.inicio);
+
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet('Calendario Herrería');
+        ws.columns = [
+            { width: 30 }, { width: 30 }, { width: 14 }, { width: 14 }, { width: 16 }, { width: 10 }
+        ];
+
+        ws.mergeCells('A1:F1');
+        const titulo = ws.getCell('A1');
+        titulo.value = 'CALENDARIO DE EJECUCIÓN — TALLER DE HERRERÍA';
+        titulo.font = { name: 'Arial Black', size: 13, bold: true, color: { argb: 'FFFFFF' } };
+        titulo.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '7C3AED' } };
+        titulo.alignment = { horizontal: 'left', vertical: 'center' };
+        ws.getRow(1).height = 28;
+
+        const hdrs = ['Proyecto', 'Tarea', 'Inicio', 'Fin', 'Estado', 'Avance %'];
+        hdrs.forEach((h, i) => {
+            const c = ws.getRow(2).getCell(i + 1);
+            c.value = h;
+            c.font = { bold: true, color: { argb: 'FFFFFF' } };
+            c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '334155' } };
+            c.alignment = { horizontal: 'center', vertical: 'center' };
+        });
+        ws.getRow(2).height = 20;
+
+        eventos.forEach((ev, i) => {
+            const row = i + 3;
+            const vals = [ev.proyecto, ev.tarea, ev.inicio, ev.fin, ev.estado, ev.avance + '%'];
+            vals.forEach((v, j) => {
+                const c = ws.getRow(row).getCell(j + 1);
+                c.value = v;
+                if (j === 2 || j === 3) c.numFmt = 'dd/mm/yyyy';
+                c.alignment = { horizontal: j < 2 ? 'left' : 'center', vertical: 'center' };
+                const s = { style: 'thin', color: { argb: 'CBD5E1' } };
+                c.border = { left: s, right: s, top: s, bottom: s };
+            });
+        });
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=Calendario_Herreria.xlsx');
+        await wb.xlsx.write(res);
+        res.end();
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;

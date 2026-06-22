@@ -85,6 +85,7 @@
 <!-- TABS -->
 <div class="flex flex-wrap gap-0 border-b border-slate-300 bg-white rounded-t-xl px-2 pt-2 shadow border border-b-0 border-slate-200">
     <button onclick="tab('tablero')"   id="tab-tablero"   class="tab active-tab">📊 Tablero</button>
+    <button onclick="tab('calendario')" id="tab-calendario" class="tab">📅 Calendario</button>
     <button onclick="tab('proyectos')" id="tab-proyectos" class="tab">📋 Proyectos</button>
     <button onclick="tab('nuevo')"     id="tab-nuevo"     class="tab">＋ Nuevo proyecto</button>
 </div>
@@ -92,6 +93,25 @@
 <!-- PANEL: TABLERO -->
 <div id="panel-tablero" class="space-y-3">
     <div id="tablero-contenido"></div>
+</div>
+
+<!-- PANEL: CALENDARIO -->
+<div id="panel-calendario" class="hidden bg-white rounded-xl shadow border border-slate-200 p-4 space-y-4">
+    <div class="flex justify-between items-center">
+        <div class="flex gap-1">
+            <button onclick="calVista('mes')" id="cal-tab-mes" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700">Mes</button>
+            <button onclick="calVista('semana')" id="cal-tab-semana" class="text-xs font-bold px-3 py-1.5 rounded-lg text-slate-500 hover:bg-slate-100">Semana</button>
+        </div>
+        <button onclick="descargarCalendarioExcel()" class="text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 flex items-center gap-1">📥 Descargar Excel</button>
+    </div>
+    <div class="flex items-center gap-3">
+        <button onclick="calNav(-1)" class="text-slate-400 hover:text-violet-600 text-lg px-2">‹</button>
+        <span id="cal-label" class="text-sm font-black text-slate-700 flex-1 text-center">—</span>
+        <button onclick="calNav(1)" class="text-slate-400 hover:text-violet-600 text-lg px-2">›</button>
+    </div>
+    <div id="cal-mes-grid"></div>
+    <div id="cal-semana-grid" class="hidden"></div>
+    <div id="cal-leyenda" class="flex flex-wrap gap-3 pt-2 border-t border-slate-100"></div>
 </div>
 
 <!-- PANEL: PROYECTOS (lista) -->
@@ -200,6 +220,36 @@
 
 </div><!-- fin max-w -->
 
+<!-- MODAL EDITAR PROYECTO -->
+<div id="modal-proyecto" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+        <div class="flex justify-between items-center border-b pb-3">
+            <h3 class="text-lg font-black text-slate-800">✏️ Editar proyecto</h3>
+            <button onclick="cerrarModalProyecto()" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">✕</button>
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Nombre</label>
+            <input id="mp-nombre" type="text" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none uppercase text-sm">
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Cliente / obra</label>
+            <input id="mp-cliente" type="text" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm">
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Responsable</label>
+            <input id="mp-responsable" type="text" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm">
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Notas</label>
+            <textarea id="mp-notas" rows="3" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm resize-none"></textarea>
+        </div>
+        <div class="flex gap-2 pt-2">
+            <button onclick="guardarProyectoEdit()" class="flex-1 bg-violet-600 text-white font-bold py-2 rounded-xl hover:bg-violet-700">Guardar</button>
+            <button onclick="cerrarModalProyecto()" class="flex-1 bg-slate-100 text-slate-700 font-bold py-2 rounded-xl hover:bg-slate-200">Cancelar</button>
+        </div>
+    </div>
+</div>
+
 <!-- MODAL EDITAR TAREA -->
 <div id="modal-tarea" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
     <div class="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
@@ -264,7 +314,7 @@ async function cerrarSesion() {
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 function tab(nombre) {
-    ['tablero','proyectos','nuevo','detalle'].forEach(p => {
+    ['tablero','calendario','proyectos','nuevo','detalle'].forEach(p => {
         document.getElementById(`panel-${p}`).classList.add('hidden');
         const t = document.getElementById(`tab-${p}`);
         if (t) t.classList.remove('active-tab');
@@ -272,6 +322,7 @@ function tab(nombre) {
     document.getElementById(`panel-${nombre}`).classList.remove('hidden');
     const t = document.getElementById(`tab-${nombre}`);
     if (t) t.classList.add('active-tab');
+    if (nombre === 'calendario') cargarCalendario();
 }
 
 // ─── Carga de datos ───────────────────────────────────────────────────────────
@@ -322,25 +373,38 @@ function renderEstadisticas() {
 // ─── Tablero ──────────────────────────────────────────────────────────────────
 function renderTabliero() {
     const cont = document.getElementById('tablero-contenido');
-    const activos = proyectos.filter(p => p.estado === 'ACTIVO' || p.estado === 'PAUSADO');
-    if (!activos.length) {
+    // Solo activos y pausados — terminados no se ven en el tablero principal
+    const visibles = proyectos.filter(p => p.estado === 'ACTIVO' || p.estado === 'PAUSADO');
+    // Pausados primero (necesitan atención/decisión), luego activos ordenados por estado de buffer
+    const orden = { CRITICO: 0, ALERTA: 1, OK: 2 };
+    visibles.sort((a, b) => {
+        if (a.estado === 'PAUSADO' && b.estado !== 'PAUSADO') return -1;
+        if (b.estado === 'PAUSADO' && a.estado !== 'PAUSADO') return 1;
+        return (orden[a.bufferEstado] ?? 2) - (orden[b.bufferEstado] ?? 2);
+    });
+
+    if (!visibles.length) {
         cont.innerHTML = `<div class="bg-white rounded-xl p-10 text-center text-slate-400 shadow border border-slate-200 italic">
             No hay proyectos activos. <button onclick="tab('nuevo')" class="text-violet-600 font-bold hover:underline">Crear uno</button>
         </div>`;
         return;
     }
-    cont.innerHTML = activos.map(p => tarjetaTablero(p)).join('');
+    cont.innerHTML = visibles.map(p => tarjetaTablero(p)).join('');
 }
 
 function tarjetaTablero(p) {
-    const bdg = badgeBuffer(p.bufferEstado);
     const tareasActivas = (p.Tareas || []).filter(t => t.feverChart);
+    // El estado de buffer mostrado es el PEOR entre las tareas de este proyecto —
+    // no un valor inventado a nivel proyecto, sino el resumen de sus propias tareas.
+    const bdg = tareasActivas.length
+        ? badgeBuffer(p.bufferEstado)
+        : `<span class="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400">Sin restricción activa</span>`;
     const feverHtml = tareasActivas.length
         ? tareasActivas.map(t => miniFeverbChart(t)).join('')
         : `<div class="text-xs text-slate-400 italic mt-2">Sin tareas activas con fever chart</div>`;
 
     const pausadoBadge = p.estado === 'PAUSADO'
-        ? `<span class="text-xs font-bold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">PAUSADO</span>` : '';
+        ? `<span class="text-xs font-bold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">⏸ PAUSADO</span>` : '';
 
     return `<div class="bg-white rounded-xl p-4 shadow border border-slate-200 cursor-pointer hover:border-violet-300 transition space-y-2"
         onclick="abrirDetalle(${p.id})">
@@ -433,6 +497,7 @@ function renderDetalle() {
     const acc = document.getElementById('det-acciones');
     let html = '';
     if (esAdmin) {
+        html += `<button onclick="abrirModalProyecto()" class="bg-violet-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-violet-700 transition">✏️ Editar proyecto</button>`;
         if (p.estado === 'BORRADOR' || p.estado === 'PAUSADO')
             html += `<button onclick="accionProyecto('activar')" class="bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-green-700 transition">▶ Activar</button>`;
         if (p.estado === 'ACTIVO')
@@ -940,6 +1005,39 @@ function abrirModalTarea(t) {
 
 function cerrarModalTarea() { document.getElementById('modal-tarea').classList.add('hidden'); }
 
+// ─── Modal editar proyecto ────────────────────────────────────────────────────
+function abrirModalProyecto() {
+    const p = proyectoActual;
+    document.getElementById('mp-nombre').value      = p.nombre || '';
+    document.getElementById('mp-cliente').value     = p.cliente || '';
+    document.getElementById('mp-responsable').value = p.responsable || '';
+    document.getElementById('mp-notas').value       = p.notas || '';
+    document.getElementById('modal-proyecto').classList.remove('hidden');
+}
+
+function cerrarModalProyecto() {
+    document.getElementById('modal-proyecto').classList.add('hidden');
+}
+
+async function guardarProyectoEdit() {
+    const nombre = document.getElementById('mp-nombre').value.trim().toUpperCase();
+    if (!nombre) { alert('El nombre es obligatorio.'); return; }
+    await fetch(`/herreria/proyectos/${proyectoActual.id}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+            nombre,
+            cliente:     document.getElementById('mp-cliente').value.trim(),
+            responsable: document.getElementById('mp-responsable').value.trim(),
+            notas:       document.getElementById('mp-notas').value.trim(),
+        })
+    });
+    cerrarModalProyecto();
+    const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
+    proyectoActual = await res.json();
+    renderDetalle();
+    await cargarProyectos();
+}
+
 function mtCalcBuf() {
     const dias = parseInt(document.getElementById('mt-dias').value) || 0;
     document.getElementById('mt-buf').value = Math.ceil(dias * 0.30) + ' días';
@@ -992,8 +1090,132 @@ function clsEstado(e) {
     }[e] || 'bg-slate-100 text-slate-600';
 }
 
+// ─── CALENDARIO ───────────────────────────────────────────────────────────────
+let calEventos = [];
+let calVistaActual = 'mes';
+let calFechaRef = new Date();
+const COLORES_PROYECTO = [
+    { bg:'#E6F1FB', txt:'#0C447C' }, { bg:'#FAEEDA', txt:'#854F0B' },
+    { bg:'#EEEDFE', txt:'#3C3489' }, { bg:'#FBEAF0', txt:'#993556' },
+    { bg:'#E1F5EE', txt:'#0F6E56' }, { bg:'#FAECE7', txt:'#993C1D' },
+    { bg:'#EAF3DE', txt:'#3B6D11' }, { bg:'#F1EFE8', txt:'#5F5E5A' },
+];
+
+async function cargarCalendario() {
+    const res = await fetch('/herreria/calendario');
+    calEventos = await res.json();
+    renderCalendario();
+}
+
+function calVista(v) {
+    calVistaActual = v;
+    document.getElementById('cal-tab-mes').className    = 'text-xs font-bold px-3 py-1.5 rounded-lg ' + (v==='mes'    ? 'bg-violet-100 text-violet-700' : 'text-slate-500 hover:bg-slate-100');
+    document.getElementById('cal-tab-semana').className = 'text-xs font-bold px-3 py-1.5 rounded-lg ' + (v==='semana' ? 'bg-violet-100 text-violet-700' : 'text-slate-500 hover:bg-slate-100');
+    document.getElementById('cal-mes-grid').classList.toggle('hidden', v!=='mes');
+    document.getElementById('cal-semana-grid').classList.toggle('hidden', v!=='semana');
+    renderCalendario();
+}
+
+function calNav(dir) {
+    if (calVistaActual === 'mes') calFechaRef.setMonth(calFechaRef.getMonth() + dir);
+    else calFechaRef.setDate(calFechaRef.getDate() + dir * 7);
+    renderCalendario();
+}
+
+function fmtYMD(d) {
+    const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${dd}`;
+}
+
+function colorProyecto(proyectoId) {
+    const ids = [...new Set(calEventos.map(e => e.proyectoId))];
+    const idx = ids.indexOf(proyectoId) % COLORES_PROYECTO.length;
+    return COLORES_PROYECTO[idx] || COLORES_PROYECTO[0];
+}
+
+function eventosEnDia(fecha) {
+    const ymd = fmtYMD(fecha);
+    return calEventos.filter(e => ymd >= e.inicio && ymd <= e.fin);
+}
+
+function renderCalendario() {
+    const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+    if (calVistaActual === 'mes') {
+        document.getElementById('cal-label').textContent = `${meses[calFechaRef.getMonth()]} ${calFechaRef.getFullYear()}`;
+        const primerDia = new Date(calFechaRef.getFullYear(), calFechaRef.getMonth(), 1);
+        let inicioGrid = new Date(primerDia);
+        const offset = (inicioGrid.getDay() + 6) % 7; // lunes = 0
+        inicioGrid.setDate(inicioGrid.getDate() - offset);
+
+        const hoy = fmtYMD(new Date());
+        let html = `<div class="grid grid-cols-7 gap-1 text-xs">`;
+        ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].forEach(d => {
+            html += `<div class="text-center font-bold text-slate-400 py-1">${d}</div>`;
+        });
+        let cursor = new Date(inicioGrid);
+        for (let i = 0; i < 42; i++) {
+            const esDelMes = cursor.getMonth() === calFechaRef.getMonth();
+            const esHoy = fmtYMD(cursor) === hoy;
+            const evs = eventosEnDia(cursor);
+            html += `<div class="rounded-lg p-1 min-h-[64px] ${esDelMes?'bg-slate-50':'bg-slate-50/40 opacity-40'} ${esHoy?'ring-2 ring-violet-400':''}">
+                <div class="font-bold text-slate-600">${cursor.getDate()}</div>
+                ${evs.slice(0,3).map(e => {
+                    const c = colorProyecto(e.proyectoId);
+                    return `<div class="text-[10px] rounded px-1 mb-0.5 truncate" style="background:${c.bg};color:${c.txt}" title="${e.proyectoNombre} — ${e.tareaNombre}">${e.proyectoNombre}</div>`;
+                }).join('')}
+                ${evs.length > 3 ? `<div class="text-[10px] text-slate-400">+${evs.length-3} más</div>` : ''}
+            </div>`;
+            cursor.setDate(cursor.getDate() + 1);
+        }
+        html += `</div>`;
+        document.getElementById('cal-mes-grid').innerHTML = html;
+    } else {
+        // Semana: lunes a sábado (6 días)
+        let lunes = new Date(calFechaRef);
+        const offset = (lunes.getDay() + 6) % 7;
+        lunes.setDate(lunes.getDate() - offset);
+        const sabado = new Date(lunes); sabado.setDate(sabado.getDate() + 5);
+        document.getElementById('cal-label').textContent =
+            `Semana del ${lunes.getDate()}/${lunes.getMonth()+1} al ${sabado.getDate()}/${sabado.getMonth()+1}`;
+
+        let html = `<div class="grid grid-cols-6 gap-2">`;
+        const nombresDias = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+        let cursor = new Date(lunes);
+        for (let i = 0; i < 6; i++) {
+            const evs = eventosEnDia(cursor);
+            html += `<div class="border border-slate-200 rounded-xl p-2 min-h-[140px]">
+                <div class="text-xs font-bold text-slate-600 border-b border-slate-100 pb-1 mb-2">${nombresDias[i]} ${cursor.getDate()}</div>
+                ${evs.length ? evs.map(e => {
+                    const c = colorProyecto(e.proyectoId);
+                    return `<div class="rounded-lg p-1.5 mb-1.5 text-xs" style="background:${c.bg};color:${c.txt}">
+                        <div class="font-bold truncate">${e.tareaNombre}</div>
+                        <div class="text-[10px] opacity-80 truncate">${e.proyectoNombre} · ${e.avancePct}%</div>
+                    </div>`;
+                }).join('') : `<div class="text-[11px] text-slate-300 italic">Sin tareas</div>`}
+            </div>`;
+            cursor.setDate(cursor.getDate() + 1);
+        }
+        html += `</div>`;
+        document.getElementById('cal-semana-grid').innerHTML = html;
+    }
+
+    // Leyenda de proyectos con color
+    const ids = [...new Set(calEventos.map(e => e.proyectoId))];
+    const leyenda = ids.map(id => {
+        const c = colorProyecto(id);
+        const nombre = calEventos.find(e => e.proyectoId === id)?.proyectoNombre || '';
+        return `<span class="text-xs flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${c.txt}"></span>${nombre}</span>`;
+    }).join('');
+    document.getElementById('cal-leyenda').innerHTML = leyenda || '<span class="text-xs text-slate-400 italic">Sin proyectos con tareas activadas</span>';
+}
+
+function descargarCalendarioExcel() {
+    window.location.href = '/herreria/calendario/excel';
+}
+
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') cerrarModalTarea();
+    if (e.key === 'Escape') { cerrarModalTarea(); cerrarModalProyecto(); }
 });
 </script>
 </body>
