@@ -54,7 +54,7 @@ router.get('/proyectos', proteger, async (req, res) => {
     try {
         const proyectos = await Proyecto.findAll({
             include: [{ model: Tarea, as: 'Tareas', include: [{ model: KitItem, as: 'KitItems' }] }],
-            order: [['createdAt', 'DESC'], [Tarea, 'orden', 'ASC']]
+            order: [['createdAt', 'DESC'], [{ model: Tarea, as: 'Tareas' }, 'orden', 'ASC']]
         });
 
         const resultado = proyectos.map(p => enriquecerProyecto(p));
@@ -145,7 +145,7 @@ router.put('/proyectos/:id', proteger, async (req, res) => {
 // POST /herreria/proyectos/:id/activar
 router.post('/proyectos/:id/activar', proteger, async (req, res) => {
     try {
-        const p = await Proyecto.findByPk(req.params.id, { include: [Tarea] });
+        const p = await Proyecto.findByPk(req.params.id, { include: [{ model: Tarea, as: 'Tareas' }] });
         if (!p) return res.status(404).json({ error: 'No encontrado' });
         if (p.estado === 'ACTIVO') return res.json({ ok: true, message: 'Ya activo' });
 
@@ -224,7 +224,7 @@ router.post('/tareas', proteger, async (req, res) => {
         }
         await recalcularTotales(proyectoId);
         await log(proyectoId, `Tarea agregada: ${nombre}`, req.session.user.username);
-        res.json(await Tarea.findByPk(t.id, { include: [KitItem] }));
+        res.json(await Tarea.findByPk(t.id, { include: [{ model: KitItem, as: 'KitItems' }] }));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -303,7 +303,7 @@ router.post('/tareas/:id/activar', proteger, async (req, res) => {
 // PUT /herreria/kit/:id — marcar o desmarcar ítem
 router.put('/kit/:id', proteger, async (req, res) => {
     try {
-        const item = await KitItem.findByPk(req.params.id, { include: [Tarea] });
+        const item = await KitItem.findByPk(req.params.id, { include: [{ model: Tarea, as: 'Tarea' }] });
         if (!item) return res.status(404).json({ error: 'No encontrado' });
         item.completado = req.body.completado;
         if (item.completado) {
