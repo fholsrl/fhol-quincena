@@ -12,11 +12,16 @@ const Proyecto = sequelize.define('ProyectoHerreria', {
     responsable:  { type: DataTypes.STRING,  allowNull: true  },
     notas:        { type: DataTypes.TEXT,    allowNull: true  },
     estado:       { type: DataTypes.STRING,  defaultValue: 'BORRADOR' },
-    // BORRADOR | ACTIVO | PAUSADO | TERMINADO
+    // BORRADOR | ACTIVO | PAUSADO | TERMINADO | CANCELADO
+    // CANCELADO: proyecto suspendido/descartado. No aparece en ninguna vista activa
+    // (tablero, calendario, lista por defecto). Queda en la base para el informe anual.
     creadoPor:    { type: DataTypes.STRING,  allowNull: true  },
     activadoEn:   { type: DataTypes.DATE,    allowNull: true  },
     pausadoEn:    { type: DataTypes.DATE,    allowNull: true  },
     terminadoEn:  { type: DataTypes.DATE,    allowNull: true  },
+    canceladoEn:  { type: DataTypes.DATE,    allowNull: true  },
+    canceladoPor: { type: DataTypes.STRING,  allowNull: true  },
+    motivoCancelacion: { type: DataTypes.STRING, allowNull: true },
     diasHabilesTotales: { type: DataTypes.INTEGER, defaultValue: 0 },
     bufferDias:   { type: DataTypes.INTEGER, defaultValue: 0  },
 }, { tableName: 'ProyectosHerreria', timestamps: true });
@@ -29,7 +34,7 @@ const Tarea = sequelize.define('TareaHerreria', {
     tipo:         { type: DataTypes.STRING,  defaultValue: 'NORMAL' },
     // NORMAL | RESTRICCION | ESPERA  (solo aplica en fase EJECUCION)
     estado:       { type: DataTypes.STRING,  defaultValue: 'PENDIENTE' },
-    // PENDIENTE | EN_PROCESO | COMPLETADA | PAUSADA | ESPERA
+    // PENDIENTE | EN_PROCESO | COMPLETADA | PAUSADA | ESPERA | ESPERANDO_PRELIMINAR
     diasHabiles:  { type: DataTypes.INTEGER, defaultValue: 1  },
     bufferDias:   { type: DataTypes.INTEGER, defaultValue: 0  },
     avancePct:    { type: DataTypes.INTEGER, defaultValue: 0  },
@@ -40,6 +45,15 @@ const Tarea = sequelize.define('TareaHerreria', {
     cerradaEn:    { type: DataTypes.DATE,    allowNull: true  },
     cerradaPor:   { type: DataTypes.STRING,  allowNull: true  },
     diasHabilesConsumidos: { type: DataTypes.INTEGER, defaultValue: 0 },
+    // ── Paralelismo y desfasaje ───────────────────────────────────────────────
+    // predecesoraId: ID de la tarea de la que depende el inicio de esta (misma fase).
+    //   Si es null, la tarea arranca apenas se libera la compuerta (comportamiento actual).
+    // desfasajeDias: cuántos días hábiles después de que ARRANCA la predecesora,
+    //   arranca esta tarea. 0 = mismo día (100% paralelas). No se basa en que la
+    //   predecesora termine — permite que una tarea larga (ej. 20 días) tenga
+    //   varias tareas cortas empezando y terminando en distintos puntos de su rango.
+    predecesoraId:  { type: DataTypes.INTEGER, allowNull: true },
+    desfasajeDias:  { type: DataTypes.INTEGER, defaultValue: 0 },
 }, { tableName: 'TareasHerreria', timestamps: true });
 
 // ── Kit (ítem de compuerta por tarea) ─────────────────────────────────────────

@@ -42,6 +42,7 @@
 <div class="flex justify-between items-center border-b-4 border-violet-600 pb-2">
     <h1 class="text-2xl font-black text-slate-800">🔩 FHOL HERRERÍA</h1>
     <div class="flex items-center gap-3">
+        <button onclick="descargarMemoriaAnual()" class="bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-bold px-3 py-2 rounded-lg transition" title="Incluye proyectos cancelados/suspendidos">📁 Memoria anual</button>
         <a href="/logistica.html" class="bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition">📦 LOGÍSTICA</a>
         <a href="/" class="bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition">📋 PERSONAL</a>
         <button onclick="cerrarSesion()" class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition">🚪 SALIR</button>
@@ -191,7 +192,10 @@
     <div class="flex items-center gap-3">
         <button onclick="cerrarDetalle()" class="text-xs font-bold text-slate-500 hover:text-violet-600 flex items-center gap-1">← Volver</button>
         <span class="text-slate-300">/</span>
-        <h2 class="font-black text-slate-800 text-lg" id="det-titulo">—</h2>
+        <div>
+            <h2 class="font-black text-slate-800 text-lg" id="det-titulo">—</h2>
+            <div class="text-xs text-slate-400" id="det-fecha-carga"></div>
+        </div>
         <span id="det-estado-badge" class="text-xs font-bold px-3 py-1 rounded-full ml-auto"></span>
     </div>
 
@@ -277,6 +281,18 @@
             <input id="mt-avance" type="range" min="0" max="100" step="1" class="w-full" oninput="document.getElementById('mt-avance-num').textContent=this.value+'%'">
             <div class="text-right text-sm font-bold text-violet-600 mt-1" id="mt-avance-num">0%</div>
         </div>
+        <div class="border-t border-slate-100 pt-3">
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Simultaneidad / desfasaje</label>
+            <p class="text-xs text-slate-400 mb-2">Si esta tarea va en paralelo con otra, elegí de cuál depende su inicio.</p>
+            <select id="mt-predecesora" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm mb-2">
+                <option value="">Sin dependencia (arranca al liberarse la fase)</option>
+            </select>
+            <div class="flex items-center gap-2" id="mt-desfasaje-wrap" style="display:none;">
+                <span class="text-xs text-slate-500 font-bold">Arranca</span>
+                <input id="mt-desfasaje" type="number" min="0" value="0" class="w-20 border-2 border-slate-200 rounded-xl p-2 text-sm text-center focus:border-violet-500 outline-none">
+                <span class="text-xs text-slate-500">días hábiles después de que arranca la predecesora (0 = mismo día)</span>
+            </div>
+        </div>
         <div class="flex gap-2 pt-2">
             <button onclick="guardarTarea()" class="flex-1 bg-violet-600 text-white font-bold py-2 rounded-xl hover:bg-violet-700">Guardar</button>
             <button onclick="cerrarModalTarea()" class="flex-1 bg-slate-100 text-slate-700 font-bold py-2 rounded-xl hover:bg-slate-200">Cancelar</button>
@@ -340,12 +356,14 @@ async function cargarRestriccion() {
     const res = await fetch('/herreria/restriccion');
     const d   = await res.json();
     const ban = document.getElementById('banner-restriccion');
-    if (d.restriccion && d.restriccion.totalDias > 0) {
+    // Solo se muestra el banner cuando 2+ proyectos compiten por el mismo recurso —
+    // eso es lo que en TOC se considera una restricción realmente saturada.
+    if (d.saturada) {
         ban.classList.remove('hidden');
         document.getElementById('restriccion-titulo').textContent =
-            `Restricción actual: ${d.restriccion.nombre}`;
+            `Cuello de botella: "${d.saturada.nombre}" está compartida entre varios proyectos`;
         document.getElementById('restriccion-detalle').textContent =
-            `${d.restriccion.tareas.length} proyectos · ${d.restriccion.totalDias} días de carga acumulada`;
+            `${d.saturada.nProyectos} proyectos necesitan este recurso al mismo tiempo · ${d.saturada.totalDias} días de trabajo acumulados entre todos`;
     } else {
         ban.classList.add('hidden');
     }
@@ -406,12 +424,16 @@ function tarjetaTablero(p) {
     const pausadoBadge = p.estado === 'PAUSADO'
         ? `<span class="text-xs font-bold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">⏸ PAUSADO</span>` : '';
 
+    const fechaCarga = p.createdAt
+        ? new Date(p.createdAt).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' })
+        : '—';
+
     return `<div class="bg-white rounded-xl p-4 shadow border border-slate-200 cursor-pointer hover:border-violet-300 transition space-y-2"
         onclick="abrirDetalle(${p.id})">
         <div class="flex justify-between items-start gap-2 flex-wrap">
             <div>
                 <div class="font-black text-slate-800 text-sm">${p.nombre}</div>
-                <div class="text-xs text-slate-400 mt-0.5">🏗️ ${p.cliente || '—'} · 👤 ${p.responsable || '—'}</div>
+                <div class="text-xs text-slate-400 mt-0.5">🏗️ ${p.cliente || '—'} · 👤 ${p.responsable || '—'} · 📅 Cargado el ${fechaCarga}</div>
             </div>
             <div class="flex items-center gap-2">${pausadoBadge}${bdg}</div>
         </div>
@@ -489,6 +511,11 @@ function renderDetalle() {
     const p = proyectoActual;
     document.getElementById('det-titulo').textContent = p.nombre;
 
+    const fechaCarga = p.createdAt
+        ? new Date(p.createdAt).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' })
+        : '—';
+    document.getElementById('det-fecha-carga').textContent = `📅 Cargado el ${fechaCarga}`;
+
     const bdgE = document.getElementById('det-estado-badge');
     bdgE.textContent = p.estado;
     bdgE.className = 'text-xs font-bold px-3 py-1 rounded-full ml-auto ' + clsEstado(p.estado);
@@ -504,6 +531,8 @@ function renderDetalle() {
             html += `<button onclick="accionProyecto('pausar')" class="bg-violet-100 text-violet-700 text-xs font-bold px-4 py-2 rounded-xl hover:bg-violet-200 transition">⏸ Pausar</button>`;
         if (p.estado === 'ACTIVO' || p.estado === 'PAUSADO')
             html += `<button onclick="accionProyecto('terminar')" class="bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-blue-800 transition">✅ Marcar terminado</button>`;
+        if (p.estado !== 'TERMINADO' && p.estado !== 'CANCELADO')
+            html += `<button onclick="cancelarProyecto()" class="bg-red-100 text-red-700 text-xs font-bold px-4 py-2 rounded-xl hover:bg-red-200 transition">🗑️ Cancelar proyecto</button>`;
     }
     if (p.estado === 'TERMINADO')
         html += `<button onclick="descargarInforme(${p.id})" class="bg-slate-700 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-slate-800 transition">📥 Descargar informe</button>`;
@@ -624,15 +653,18 @@ function tarjetaTarea(t, p) {
         : t.tipo === 'ESPERA'
         ? `<span class="text-xs font-bold bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full">En espera</span>` : '';
 
+    const esperandoPreliminar = t.estado === 'ESPERANDO_PRELIMINAR'
+        ? `<span class="text-xs font-bold bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full flex items-center gap-1">🔒 Esperando que se cierren las preliminares</span>` : '';
+
     const activarEspera = t.tipo === 'ESPERA' && t.estado === 'ESPERA' && esAdmin
         ? `<button onclick="activarTareaEspera(${t.id})" class="text-xs bg-green-600 text-white px-3 py-1 rounded-lg font-bold hover:bg-green-700">▶ Activar</button>` : '';
 
-    return `<div class="bg-white rounded-xl shadow border ${t.tipo==='RESTRICCION'?'border-amber-300':'border-slate-200'} overflow-hidden">
+    return `<div class="bg-white rounded-xl shadow border ${t.tipo==='RESTRICCION'?'border-amber-300':t.estado==='ESPERANDO_PRELIMINAR'?'border-orange-200':'border-slate-200'} overflow-hidden ${t.estado==='ESPERANDO_PRELIMINAR'?'opacity-60':''}">
         <div class="p-4">
             <div class="flex justify-between items-start gap-2 flex-wrap">
                 <div>
                     <div class="font-black text-slate-800 text-sm">${t.nombre}</div>
-                    <div class="flex items-center gap-2 mt-1">${tipoBadge}${kitStatus}${activarEspera}</div>
+                    <div class="flex items-center gap-2 mt-1">${tipoBadge}${esperandoPreliminar}${kitStatus}${activarEspera}</div>
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-xs text-slate-500">${t.diasHabiles}d plan · ${t.bufferDias}d buf</span>
@@ -660,12 +692,13 @@ function tarjetaTarea(t, p) {
                 <input type="range" min="0" max="100" value="${fc.avancePct}" step="1"
                     class="flex-1" oninput="actualizarAvance(${t.id},this.value,this)">
                 <span class="text-xs font-bold text-violet-600 w-10 text-right" id="avlbl-${t.id}">${fc.avancePct}%</span>
-            </div>` : (t.tipo !== 'ESPERA' ? `
+            </div>` : (t.tipo !== 'ESPERA' && t.estado !== 'ESPERANDO_PRELIMINAR' && t.estado !== 'PENDIENTE' ? `
             <div class="mt-2 flex items-center gap-2">
                 <input type="range" min="0" max="100" value="${t.avancePct}" step="1"
                     class="flex-1" oninput="actualizarAvance(${t.id},this.value,this)">
                 <span class="text-xs font-bold text-violet-600 w-10 text-right" id="avlbl-${t.id}">${t.avancePct}%</span>
-            </div>` : '')}
+            </div>` : t.estado === 'ESPERANDO_PRELIMINAR' ? `
+            <div class="mt-2 text-xs text-orange-600 italic">Esta tarea de ejecución arranca automáticamente cuando se completen todas las preliminares.</div>` : '')}
         </div>
 
         ${(t.KitItems||[]).length ? `
@@ -734,6 +767,17 @@ async function accionProyecto(accion) {
     await cargarRestriccion();
 }
 
+async function cancelarProyecto() {
+    const motivo = prompt('¿Por qué se cancela este proyecto? (suspendido, cliente desistió, etc.)\n\nEl proyecto desaparecerá de todas las vistas, pero queda guardado en la memoria anual.');
+    if (motivo === null) return; // canceló el prompt, no la acción
+    if (!confirm('¿Confirmás cancelar "' + proyectoActual.nombre + '"? Dejará de verse en el tablero, calendario y listado.')) return;
+    await fetch(`/herreria/proyectos/${proyectoActual.id}/cancelar`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ motivo })
+    });
+    cerrarDetalle();
+}
+
 async function activarTareaEspera(tareaId) {
     await fetch(`/herreria/tareas/${tareaId}/activar`, { method:'POST' });
     const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
@@ -785,6 +829,12 @@ async function agregarNota() {
 // ─── Informe ──────────────────────────────────────────────────────────────────
 function descargarInforme(id) {
     window.location.href = `/herreria/proyectos/${id}/informe`;
+}
+
+function descargarMemoriaAnual() {
+    const anio = prompt('¿De qué año querés la memoria? (incluye proyectos cancelados/suspendidos)', new Date().getFullYear());
+    if (!anio) return;
+    window.location.href = `/herreria/informe-anual?anio=${anio}`;
 }
 
 // ─── Nuevo proyecto ───────────────────────────────────────────────────────────
@@ -1000,6 +1050,24 @@ function abrirModalTarea(t) {
     document.getElementById('mt-avance').value = t.avancePct;
     document.getElementById('mt-avance-num').textContent = t.avancePct + '%';
     mtCalcBuf();
+
+    // Poblar lista de posibles predecesoras: todas las tareas de la misma fase
+    // del proyecto actual, excepto ella misma (no puede depender de sí misma).
+    const sel = document.getElementById('mt-predecesora');
+    const todasLasTareas = [
+        ...(proyectoActual.tareasPreliminares || []),
+        ...(proyectoActual.tareasEjecucion || [])
+    ];
+    const candidatas = todasLasTareas.filter(x => x.id !== t.id && x.fase === t.fase);
+    sel.innerHTML = '<option value="">Sin dependencia (arranca al liberarse la fase)</option>' +
+        candidatas.map(x => `<option value="${x.id}" ${t.predecesoraId===x.id?'selected':''}>${x.nombre}</option>`).join('');
+
+    document.getElementById('mt-desfasaje').value = t.desfasajeDias || 0;
+    document.getElementById('mt-desfasaje-wrap').style.display = t.predecesoraId ? 'flex' : 'none';
+    sel.onchange = () => {
+        document.getElementById('mt-desfasaje-wrap').style.display = sel.value ? 'flex' : 'none';
+    };
+
     document.getElementById('modal-tarea').classList.remove('hidden');
 }
 
@@ -1048,9 +1116,11 @@ async function guardarTarea() {
     const nombre = document.getElementById('mt-nombre').value.trim().toUpperCase();
     const dias   = parseInt(document.getElementById('mt-dias').value);
     const avance = parseInt(document.getElementById('mt-avance').value);
+    const predecesoraId = document.getElementById('mt-predecesora').value || null;
+    const desfasajeDias = parseInt(document.getElementById('mt-desfasaje').value) || 0;
     await fetch(`/herreria/tareas/${id}`, {
         method:'PUT', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ nombre, diasHabiles: dias, avancePct: avance })
+        body: JSON.stringify({ nombre, diasHabiles: dias, avancePct: avance, predecesoraId, desfasajeDias })
     });
     cerrarModalTarea();
     const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);

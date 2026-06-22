@@ -52,7 +52,11 @@ async function log(proyectoId, accion, usuario, datos = null) {
 // GET /herreria/proyectos — lista todos con estado de buffer
 router.get('/proyectos', proteger, async (req, res) => {
     try {
+        // Por defecto, los proyectos CANCELADOS no aparecen en ninguna vista activa.
+        // Solo se ven si se pide explícitamente ?incluirCancelados=true (informe anual).
+        const where = req.query.incluirCancelados === 'true' ? {} : { estado: { [Op.ne]: 'CANCELADO' } };
         const proyectos = await Proyecto.findAll({
+            where,
             include: [{ model: Tarea, as: 'Tareas', include: [{ model: KitItem, as: 'KitItems' }] }],
             order: [['createdAt', 'DESC'], [{ model: Tarea, as: 'Tareas' }, 'orden', 'ASC']]
         });
@@ -143,6 +147,45 @@ router.put('/proyectos/:id', proteger, async (req, res) => {
 });
 
 // POST /herreria/proyectos/:id/activar
+// Calendariza un conjunto de tareas según sus dependencias (predecesoraId + desfasajeDias)
+// en lugar de un cursor puramente secuencial. Reglas:
+//  - Tarea SIN predecesora → arranca en `fechaBase` (la fecha de liberación de su fase).
+//  - Tarea CON predecesora → arranca `desfasajeDias` días hábiles después de que
+//    ARRANCÓ la predecesora (no de que termine) — permite paralelismo y desfasajes
+//    parciales: una tarea larga puede tener varias cortas empezando en distintos puntos.
+//  - Si la predecesora todavía no tiene fecha calculada al momento de procesar esta
+//    tarea (por el orden del array), se reintenta en una segunda pasada.
+function calendarizarPorDependencias(tareas, fechaBase) {
+    const porId = {};
+    tareas.forEach(t => { porId[t.id] = t; });
+    const fechaInicio = {}; // id -> Date ya calculada
+
+    let pendientes = [...tareas];
+    let avanzo = true;
+    while (pendientes.length && avanzo) {
+        avanzo = false;
+        pendientes = pendientes.filter(t => {
+            if (!t.predecesoraId) {
+                fechaInicio[t.id] = new Date(fechaBase);
+                avanzo = true;
+                return false;
+            }
+            const fechaPred = fechaInicio[t.predecesoraId];
+            if (fechaPred) {
+                fechaInicio[t.id] = sumarDiasHabiles(fechaPred, t.desfasajeDias || 0);
+                avanzo = true;
+                return false;
+            }
+            return true; // sigue esperando a su predecesora
+        });
+    }
+    // Si quedó alguna sin resolver (predecesora inválida/circular), arranca en fechaBase
+    pendientes.forEach(t => { fechaInicio[t.id] = new Date(fechaBase); });
+
+    return fechaInicio;
+}
+
+// POST /herreria/proyectos/:id/activar
 router.post('/proyectos/:id/activar', proteger, async (req, res) => {
     try {
         const p = await Proyecto.findByPk(req.params.id, { include: [{ model: Tarea, as: 'Tareas' }] });
@@ -153,25 +196,67 @@ router.post('/proyectos/:id/activar', proteger, async (req, res) => {
         p.activadoEn = new Date();
         await p.save();
 
-        // Activar tareas que NO están en espera, en orden
-        // Preliminares y ejecución corren en cursores separados porque preliminares
-        // (orden de compra → adelanto) no bloquea el inicio de ejecución necesariamente,
-        // pero por simplicidad inicial se respeta el orden cargado.
-        let cursor = new Date();
-        for (const t of p.Tareas.sort((a, b) => a.orden - b.orden)) {
-            if (t.tipo === 'ESPERA') continue;
-            if (t.estado === 'PENDIENTE') {
-                t.activadaEn = cursor;
+        // COMPUERTA PRELIMINAR → EJECUCIÓN:
+        // Al activar, solo arrancan las tareas PRELIMINAR. Las de EJECUCION quedan
+        // en estado ESPERANDO_PRELIMINAR hasta que TODAS las preliminares estén
+        // completadas — recién ahí se activan automáticamente (ver marcarHecha).
+        const preliminares = p.Tareas.filter(t => t.fase === 'PRELIMINAR' && t.estado === 'PENDIENTE');
+        const ejecucion    = p.Tareas.filter(t => t.fase !== 'PRELIMINAR');
+
+        const fechasPrelim = calendarizarPorDependencias(preliminares, new Date());
+        for (const t of preliminares) {
+            t.activadaEn = fechasPrelim[t.id];
+            t.estado     = 'EN_PROCESO';
+            await t.save();
+        }
+
+        // Tareas de ejecución: si no hay preliminares (proyecto sin esa fase),
+        // se activan directo con su propia calendarización. Si hay preliminares,
+        // quedan bloqueadas por la compuerta hasta que se liberen todas.
+        if (preliminares.length === 0) {
+            const elegibles = ejecucion.filter(t => t.tipo !== 'ESPERA' && t.estado === 'PENDIENTE');
+            const fechasEjec = calendarizarPorDependencias(elegibles, new Date());
+            for (const t of elegibles) {
+                t.activadaEn = fechasEjec[t.id];
                 t.estado     = 'EN_PROCESO';
                 await t.save();
-                const avance = t.fase === 'PRELIMINAR' ? t.diasHabiles : (t.diasHabiles + t.bufferDias);
-                cursor = sumarDiasHabiles(cursor, avance);
+            }
+        } else {
+            for (const t of ejecucion) {
+                if (t.tipo === 'ESPERA' || t.estado !== 'PENDIENTE') continue;
+                t.estado = 'ESPERANDO_PRELIMINAR';
+                await t.save();
             }
         }
+
         await log(p.id, 'Proyecto activado', req.session.user.username);
         res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// Helper: revisa si todas las preliminares de un proyecto están completadas,
+// y si es así, libera (activa) las tareas de ejecución que estaban esperando,
+// calendarizándolas según sus dependencias (paralelismo/desfasaje).
+async function verificarCompuertaPreliminar(proyectoId, usuario) {
+    const tareas = await Tarea.findAll({ where: { proyectoId } });
+    const preliminares = tareas.filter(t => t.fase === 'PRELIMINAR');
+    if (!preliminares.length) return; // no hay preliminares, no aplica compuerta
+
+    const todasHechas = preliminares.every(t => t.estado === 'COMPLETADA');
+    if (!todasHechas) return;
+
+    const enEspera = tareas.filter(t => t.fase !== 'PRELIMINAR' && t.estado === 'ESPERANDO_PRELIMINAR');
+    if (!enEspera.length) return;
+
+    const fechas = calendarizarPorDependencias(enEspera, new Date());
+    for (const t of enEspera) {
+        if (t.tipo === 'ESPERA') { t.estado = 'ESPERA'; await t.save(); continue; }
+        t.activadaEn = fechas[t.id];
+        t.estado     = 'EN_PROCESO';
+        await t.save();
+    }
+    await log(proyectoId, 'Compuerta preliminar → ejecución abierta: todas las preliminares completadas', usuario);
+}
 
 // POST /herreria/proyectos/:id/pausar
 router.post('/proyectos/:id/pausar', proteger, async (req, res) => {
@@ -195,6 +280,25 @@ router.post('/proyectos/:id/terminar', proteger, async (req, res) => {
         p.terminadoEn = new Date();
         await p.save();
         await log(p.id, 'Proyecto terminado', req.session.user.username);
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /herreria/proyectos/:id/cancelar
+// Marca el proyecto como CANCELADO — desaparece de toda vista activa (tablero,
+// calendario, listado por defecto) pero queda en la base para el informe anual.
+router.post('/proyectos/:id/cancelar', proteger, async (req, res) => {
+    try {
+        if (req.session.user.rol !== 'admin')
+            return res.status(403).json({ error: 'Solo el jefe puede cancelar un proyecto' });
+        const p = await Proyecto.findByPk(req.params.id);
+        if (!p) return res.status(404).json({ error: 'No encontrado' });
+        p.estado            = 'CANCELADO';
+        p.canceladoEn        = new Date();
+        p.canceladoPor       = req.session.user.username;
+        p.motivoCancelacion  = req.body.motivo || null;
+        await p.save();
+        await log(p.id, `Proyecto cancelado${req.body.motivo ? ': ' + req.body.motivo : ''}`, req.session.user.username);
         res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -238,11 +342,24 @@ router.put('/tareas/:id', proteger, async (req, res) => {
 
         if (esJefe) {
             // El jefe puede cambiar todo
-            const { nombre, tipo, diasHabiles, estado, notas } = req.body;
+            const { nombre, tipo, diasHabiles, estado, notas, predecesoraId, desfasajeDias } = req.body;
             if (nombre)      t.nombre      = nombre;
             if (tipo && t.fase !== 'PRELIMINAR') t.tipo = tipo;
             if (diasHabiles) { t.diasHabiles = diasHabiles; t.bufferDias = calcBuf(diasHabiles, t.fase); }
             if (estado)      t.estado      = estado;
+            if (predecesoraId !== undefined) t.predecesoraId = predecesoraId || null;
+            if (desfasajeDias !== undefined) t.desfasajeDias = parseInt(desfasajeDias) || 0;
+
+            // Si la tarea ya estaba activada y se cambió la relación de dependencia,
+            // recalcular su fecha de inicio según la nueva predecesora/desfasaje.
+            if ((predecesoraId !== undefined || desfasajeDias !== undefined) && t.activadaEn) {
+                if (t.predecesoraId) {
+                    const pred = await Tarea.findByPk(t.predecesoraId);
+                    if (pred && pred.activadaEn) {
+                        t.activadaEn = sumarDiasHabiles(new Date(pred.activadaEn), t.desfasajeDias || 0);
+                    }
+                }
+            }
         }
 
         // Marcar tarea PRELIMINAR como hecha — fija fecha de cierre real, sin buffer/fever
@@ -276,6 +393,13 @@ router.put('/tareas/:id', proteger, async (req, res) => {
 
         await t.save();
         await recalcularTotales(t.proyectoId);
+
+        // Si se marcó una preliminar como hecha, revisar si ya están todas
+        // completadas — si es así, la compuerta se abre y libera ejecución.
+        if (req.body.marcarHecha === true && t.fase === 'PRELIMINAR') {
+            await verificarCompuertaPreliminar(t.proyectoId, req.session.user.username);
+        }
+
         const accionTxt = req.body.marcarHecha !== undefined
             ? `Preliminar "${t.nombre}" marcada como ${req.body.marcarHecha ? 'HECHA' : 'pendiente'}`
             : `Tarea "${t.nombre}" actualizada`;
@@ -367,15 +491,22 @@ router.get('/restriccion', proteger, async (req, res) => {
         const carga = {};
         activos.forEach(p => {
             (p.Tareas || []).forEach(t => {
-                if (!carga[t.nombre]) carga[t.nombre] = { tareas: [], totalDias: 0 };
+                if (!carga[t.nombre]) carga[t.nombre] = { tareas: [], totalDias: 0, proyectos: new Set() };
                 carga[t.nombre].tareas.push({ proyecto: p.nombre, dias: t.diasHabiles, avance: t.avancePct });
                 carga[t.nombre].totalDias += t.diasHabiles;
+                carga[t.nombre].proyectos.add(p.nombre);
             });
         });
         const ranking = Object.entries(carga)
-            .map(([nombre, data]) => ({ nombre, ...data }))
+            .map(([nombre, data]) => ({ nombre, ...data, nProyectos: data.proyectos.size, proyectos: undefined }))
             .sort((a, b) => b.totalDias - a.totalDias);
-        res.json({ restriccion: ranking[0] || null, ranking });
+
+        // Solo se considera "restricción saturada" (banner de alerta) cuando 2 o más
+        // proyectos compiten por el mismo recurso al mismo tiempo. Un solo proyecto
+        // con una tarea de tipo RESTRICCION es normal, no es una alerta de sobrecarga.
+        const saturada = ranking.find(r => r.nProyectos >= 2) || null;
+
+        res.json({ restriccion: ranking[0] || null, saturada, ranking });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -650,7 +781,8 @@ function enriquecerProyecto(p) {
 
     // Calcular fever chart SOLO para tareas de EJECUCION — preliminares no usa TOC
     tareas.forEach(t => {
-        if (t.fase === 'PRELIMINAR' || !t.activadaEn || t.estado === 'ESPERA' || t.estado === 'PENDIENTE') {
+        if (t.fase === 'PRELIMINAR' || !t.activadaEn || t.estado === 'ESPERA' ||
+            t.estado === 'PENDIENTE' || t.estado === 'ESPERANDO_PRELIMINAR') {
             t.feverChart = null; return;
         }
         const horizonte  = t.diasHabiles + t.bufferDias;
@@ -786,6 +918,76 @@ router.get('/calendario/excel', proteger, async (req, res) => {
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', 'attachment; filename=Calendario_Herreria.xlsx');
+        await wb.xlsx.write(res);
+        res.end();
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── INFORME ANUAL (incluye proyectos cancelados) ─────────────────────────────
+// GET /herreria/informe-anual?anio=2026
+// Descarga un Excel con TODOS los proyectos del año, incluidos los CANCELADOS,
+// que en cualquier otra vista del sistema están ocultos.
+router.get('/informe-anual', proteger, async (req, res) => {
+    try {
+        const anio = parseInt(req.query.anio) || new Date().getFullYear();
+        const desde = new Date(anio, 0, 1);
+        const hasta = new Date(anio, 11, 31, 23, 59, 59);
+
+        const proyectos = await Proyecto.findAll({
+            where: { createdAt: { [Op.between]: [desde, hasta] } },
+            include: [{ model: Tarea, as: 'Tareas' }],
+            order: [['createdAt', 'ASC']]
+        });
+
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet(`Memoria ${anio}`);
+        ws.columns = [
+            { width: 30 }, { width: 22 }, { width: 16 }, { width: 14 },
+            { width: 14 }, { width: 10 }, { width: 30 }
+        ];
+
+        ws.mergeCells('A1:G1');
+        const titulo = ws.getCell('A1');
+        titulo.value = `MEMORIA ANUAL ${anio} — TALLER DE HERRERÍA — TODOS LOS PROYECTOS`;
+        titulo.font = { name: 'Arial Black', size: 13, bold: true, color: { argb: 'FFFFFF' } };
+        titulo.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '334155' } };
+        titulo.alignment = { horizontal: 'left', vertical: 'center' };
+        ws.getRow(1).height = 28;
+
+        const hdrs = ['Proyecto', 'Cliente', 'Cargado el', 'Estado', 'Plan (días)', 'Tareas', 'Motivo cancelación'];
+        hdrs.forEach((h, i) => {
+            const c = ws.getRow(2).getCell(i + 1);
+            c.value = h;
+            c.font = { bold: true, color: { argb: 'FFFFFF' } };
+            c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '475569' } };
+            c.alignment = { horizontal: 'center', vertical: 'center' };
+        });
+        ws.getRow(2).height = 20;
+
+        proyectos.forEach((p, i) => {
+            const row = i + 3;
+            const esCancelado = p.estado === 'CANCELADO';
+            const vals = [
+                p.nombre, p.cliente || '—', p.createdAt, p.estado,
+                p.diasHabilesTotales, (p.Tareas || []).length,
+                esCancelado ? (p.motivoCancelacion || 'Sin motivo registrado') : ''
+            ];
+            vals.forEach((v, j) => {
+                const c = ws.getRow(row).getCell(j + 1);
+                c.value = v;
+                if (j === 2) c.numFmt = 'dd/mm/yyyy';
+                c.alignment = { horizontal: j === 0 || j === 6 ? 'left' : 'center', vertical: 'center' };
+                const s = { style: 'thin', color: { argb: 'CBD5E1' } };
+                c.border = { left: s, right: s, top: s, bottom: s };
+                if (esCancelado) {
+                    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FEE2E2' } };
+                    c.font = { color: { argb: '991B1B' } };
+                }
+            });
+        });
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=Memoria_Herreria_${anio}.xlsx`);
         await wb.xlsx.write(res);
         res.end();
     } catch (e) { res.status(500).json({ error: e.message }); }
