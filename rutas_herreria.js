@@ -53,7 +53,7 @@ async function log(proyectoId, accion, usuario, datos = null) {
 router.get('/proyectos', proteger, async (req, res) => {
     try {
         const proyectos = await Proyecto.findAll({
-            include: [{ model: Tarea, include: [KitItem] }],
+            include: [{ model: Tarea, as: 'Tareas', include: [{ model: KitItem, as: 'KitItems' }] }],
             order: [['createdAt', 'DESC'], [Tarea, 'orden', 'ASC']]
         });
 
@@ -67,8 +67,8 @@ router.get('/proyectos/:id', proteger, async (req, res) => {
     try {
         const p = await Proyecto.findByPk(req.params.id, {
             include: [
-                { model: Tarea, include: [KitItem] },
-                { model: Historial, limit: 50, order: [['createdAt', 'DESC']] }
+                { model: Tarea, as: 'Tareas', include: [{ model: KitItem, as: 'KitItems' }] },
+                { model: Historial, as: 'Historials', limit: 50, order: [['createdAt', 'DESC']] }
             ]
         });
         if (!p) return res.status(404).json({ error: 'No encontrado' });
@@ -119,7 +119,7 @@ router.post('/proyectos', proteger, async (req, res) => {
         // Recalcular totales del proyecto
         await recalcularTotales(p.id);
         await log(p.id, 'Proyecto creado', req.session.user.username, { nombre, cliente });
-        res.json(await Proyecto.findByPk(p.id, { include: [{ model: Tarea, include: [KitItem] }] }));
+        res.json(await Proyecto.findByPk(p.id, { include: [{ model: Tarea, as: 'Tareas', include: [{ model: KitItem, as: 'KitItems' }] }] }));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -362,7 +362,7 @@ router.get('/restriccion', proteger, async (req, res) => {
     try {
         const activos = await Proyecto.findAll({
             where: { estado: 'ACTIVO' },
-            include: [{ model: Tarea, where: { tipo: 'RESTRICCION', estado: { [Op.ne]: 'COMPLETADA' } }, required: false }]
+            include: [{ model: Tarea, as: 'Tareas', where: { tipo: 'RESTRICCION', estado: { [Op.ne]: 'COMPLETADA' } }, required: false }]
         });
         const carga = {};
         activos.forEach(p => {
@@ -384,8 +384,8 @@ router.get('/proyectos/:id/informe', proteger, async (req, res) => {
     try {
         const p = await Proyecto.findByPk(req.params.id, {
             include: [
-                { model: Tarea, include: [KitItem] },
-                { model: Historial, order: [['createdAt', 'ASC']] }
+                { model: Tarea, as: 'Tareas', include: [{ model: KitItem, as: 'KitItems' }] },
+                { model: Historial, as: 'Historials', order: [['createdAt', 'ASC']] }
             ]
         });
         if (!p) return res.status(404).json({ error: 'No encontrado' });
@@ -696,7 +696,7 @@ router.get('/calendario', proteger, async (req, res) => {
     try {
         const proyectos = await Proyecto.findAll({
             where: { estado: { [Op.in]: ['ACTIVO', 'PAUSADO', 'TERMINADO'] } },
-            include: [{ model: Tarea, where: { fase: { [Op.ne]: 'PRELIMINAR' } }, required: false }]
+            include: [{ model: Tarea, as: 'Tareas', where: { fase: { [Op.ne]: 'PRELIMINAR' } }, required: false }]
         });
 
         const eventos = [];
@@ -730,7 +730,7 @@ router.get('/calendario/excel', proteger, async (req, res) => {
     try {
         const proyectos = await Proyecto.findAll({
             where: { estado: { [Op.in]: ['ACTIVO', 'PAUSADO', 'TERMINADO'] } },
-            include: [{ model: Tarea, where: { fase: { [Op.ne]: 'PRELIMINAR' } }, required: false }]
+            include: [{ model: Tarea, as: 'Tareas', where: { fase: { [Op.ne]: 'PRELIMINAR' } }, required: false }]
         });
 
         const eventos = [];

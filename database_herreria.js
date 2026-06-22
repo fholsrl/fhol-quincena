@@ -60,11 +60,14 @@ const Historial = sequelize.define('HistorialHerreria', {
 }, { tableName: 'HistorialHerreria', timestamps: true, updatedAt: false });
 
 // ── Relaciones ────────────────────────────────────────────────────────────────
-Proyecto.hasMany(Tarea,     { foreignKey: 'proyectoId', onDelete: 'CASCADE' });
+// IMPORTANTE: el alias "as" debe coincidir con lo que espera el resto del código
+// (rutas_herreria.js usa obj.Tareas, t.KitItems, p.Historials). Sin "as" explícito,
+// Sequelize usa el nombre del modelo (TareaHerreria) como clave, no "Tareas".
+Proyecto.hasMany(Tarea,     { foreignKey: 'proyectoId', onDelete: 'CASCADE', as: 'Tareas' });
 Tarea.belongsTo(Proyecto,   { foreignKey: 'proyectoId' });
-Tarea.hasMany(KitItem,      { foreignKey: 'tareaId',    onDelete: 'CASCADE' });
+Tarea.hasMany(KitItem,      { foreignKey: 'tareaId',    onDelete: 'CASCADE', as: 'KitItems' });
 KitItem.belongsTo(Tarea,    { foreignKey: 'tareaId' });
-Proyecto.hasMany(Historial, { foreignKey: 'proyectoId', onDelete: 'CASCADE' });
+Proyecto.hasMany(Historial, { foreignKey: 'proyectoId', onDelete: 'CASCADE', as: 'Historials' });
 Historial.belongsTo(Proyecto,{ foreignKey: 'proyectoId' });
 
 sequelize.sync({ alter: true }).catch(e => console.error('DB Herrería:', e));
