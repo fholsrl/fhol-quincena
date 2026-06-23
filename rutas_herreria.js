@@ -202,29 +202,34 @@ function calendarizarPorDependencias(tareas, fechaBase) {
 
 // POST /herreria/proyectos/:id/activar
 // Decide el ESTADO REAL en que debe quedar una tarea al momento de liberarla:
-// si tiene dependeDuroId y esa tarea NO está COMPLETADA, queda bloqueada de
-// verdad (ESPERANDO_DEPENDENCIA) sin importar la fecha calculada — esta es la
-// compuerta real de Goldratt. Si no tiene dependencia dura, o la dependencia
-// ya está completa, pasa a EN_PROCESO normalmente.
+// si tiene dependeDuroId (de TAREA) o dependeDuroItemId (de ÍTEM DE KIT) y esa
+// dependencia no está completa, queda bloqueada de verdad (ESPERANDO_DEPENDENCIA)
+// sin importar la fecha calculada — esta es la compuerta real de Goldratt.
 async function estadoSegunDependenciaDura(tarea) {
-    if (!tarea.dependeDuroId) return 'EN_PROCESO';
-    const dep = await Tarea.findByPk(tarea.dependeDuroId);
-    if (dep && dep.estado !== 'COMPLETADA') return 'ESPERANDO_DEPENDENCIA';
+    if (tarea.dependeDuroId) {
+        const dep = await Tarea.findByPk(tarea.dependeDuroId);
+        if (dep && dep.estado !== 'COMPLETADA') return 'ESPERANDO_DEPENDENCIA';
+    }
+    if (tarea.dependeDuroItemId) {
+        const item = await KitItem.findByPk(tarea.dependeDuroItemId);
+        if (item && !item.completado) return 'ESPERANDO_DEPENDENCIA';
+    }
     return 'EN_PROCESO';
 }
 
 // Revisa todas las tareas en ESPERANDO_DEPENDENCIA de un proyecto: si su
-// dependencia dura ya se completó, las libera a EN_PROCESO. Se llama cada vez
-// que una tarea se marca como COMPLETADA, para destrabar en cadena.
+// dependencia dura (tarea completa o ítem puntual del kit) ya se cumplió,
+// las libera a EN_PROCESO. Se llama cada vez que una tarea se marca como
+// COMPLETADA o un ítem de kit se marca como completado, para destrabar en cadena.
 async function liberarDependenciasDuras(proyectoId, usuario) {
     const tareas = await Tarea.findAll({ where: { proyectoId, estado: 'ESPERANDO_DEPENDENCIA' } });
     for (const t of tareas) {
-        const dep = await Tarea.findByPk(t.dependeDuroId);
-        if (dep && dep.estado === 'COMPLETADA') {
+        const nuevoEstado = await estadoSegunDependenciaDura(t);
+        if (nuevoEstado === 'EN_PROCESO') {
             t.estado = 'EN_PROCESO';
             if (!t.activadaEn) t.activadaEn = new Date();
             await t.save();
-            await log(proyectoId, `Tarea "${t.nombre}" liberada — su dependencia dura ya se completó`, usuario);
+            await log(proyectoId, `Tarea "${t.nombre}" liberada — su dependencia dura ya se cumplió`, usuario);
         }
     }
 }
@@ -400,14 +405,20 @@ router.put('/tareas/:id', proteger, async (req, res) => {
 
         if (esJefe) {
             // El jefe puede cambiar todo
-            const { nombre, tipo, diasHabiles, estado, notas, predecesoraId, desfasajeDias, dependeDuroId } = req.body;
+            const { nombre, tipo, diasHabiles, estado, notas, predecesoraId, desfasajeDias,
+                    dependeDuroId, dependeDuroItemId, diasManual } = req.body;
             if (nombre)      t.nombre      = nombre;
             if (tipo && t.fase !== 'PRELIMINAR') t.tipo = tipo;
+            if (diasManual !== undefined) t.diasManual = !!diasManual;
+            // Si se manda diasHabiles, se respeta SIEMPRE que el body lo incluya
+            // (el frontend solo lo manda cuando el campo no está bloqueado, o
+            // cuando el jefe activó explícitamente "fijar días a mano").
             if (diasHabiles) { t.diasHabiles = diasHabiles; t.bufferDias = calcBuf(diasHabiles, t.fase); }
             if (estado)      t.estado      = estado;
             if (predecesoraId !== undefined) t.predecesoraId = predecesoraId || null;
             if (desfasajeDias !== undefined) t.desfasajeDias = parseInt(desfasajeDias) || 0;
-            if (dependeDuroId !== undefined) t.dependeDuroId = dependeDuroId || null;
+            if (dependeDuroId !== undefined) { t.dependeDuroId = dependeDuroId || null; if (dependeDuroId) t.dependeDuroItemId = null; }
+            if (dependeDuroItemId !== undefined) { t.dependeDuroItemId = dependeDuroItemId || null; if (dependeDuroItemId) t.dependeDuroId = null; }
 
             // Si la tarea ya estaba activada y se cambió la relación de dependencia,
             // recalcular su fecha de inicio según la nueva predecesora/desfasaje.
@@ -420,12 +431,13 @@ router.put('/tareas/:id', proteger, async (req, res) => {
                 }
             }
 
-            // Si se acaba de asignar una dependencia dura a una tarea que ya estaba
-            // EN_PROCESO, y esa dependencia todavía no está completa, hay que
-            // bloquearla retroactivamente — la compuerta aplica desde que se define.
-            if (dependeDuroId !== undefined && dependeDuroId && t.estado === 'EN_PROCESO') {
-                const dep = await Tarea.findByPk(dependeDuroId);
-                if (dep && dep.estado !== 'COMPLETADA') t.estado = 'ESPERANDO_DEPENDENCIA';
+            // Si se acaba de asignar una dependencia dura (de tarea o de ítem) a
+            // una tarea que ya estaba EN_PROCESO, y esa dependencia todavía no se
+            // cumple, hay que bloquearla retroactivamente — la compuerta aplica
+            // desde el momento en que se define, no solo al activar el proyecto.
+            if (t.estado === 'EN_PROCESO') {
+                const nuevoEstado = await estadoSegunDependenciaDura(t);
+                if (nuevoEstado === 'ESPERANDO_DEPENDENCIA') t.estado = nuevoEstado;
             }
         }
 
@@ -503,6 +515,7 @@ router.post('/tareas/:id/activar', proteger, async (req, res) => {
 async function recalcularDiasTarea(tareaId) {
     const t = await Tarea.findByPk(tareaId, { include: [{ model: KitItem, as: 'KitItems' }] });
     if (!t || !t.KitItems || !t.KitItems.length) return;
+    if (t.diasManual) return; // el jefe fijó los días a mano — no pisar con el cálculo del kit
     const dias = calcularDiasDesdeKit(t.KitItems);
     if (dias === null) return;
     t.diasHabiles = dias;
@@ -528,6 +541,13 @@ router.put('/kit/:id', proteger, async (req, res) => {
         await log(item.Tarea.proyectoId,
             `Kit "${item.descripcion}" ${item.completado ? 'completado' : 'desmarcado'}`,
             req.session.user.username);
+
+        // Si este ítem se marcó como completado, puede destrabar otras tareas
+        // que lo tenían como compuerta dura (dependeDuroItemId).
+        if (item.completado) {
+            await liberarDependenciasDuras(item.Tarea.proyectoId, req.session.user.username);
+        }
+
         res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -368,7 +368,13 @@
         </div>
         <div class="grid grid-cols-2 gap-3">
             <div>
-                <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Días hábiles</label>
+                <div class="flex justify-between items-center mb-1">
+                    <label class="text-xs font-bold text-slate-500 uppercase">Días hábiles</label>
+                    <label class="flex items-center gap-1 text-xs font-bold text-violet-600">
+                        <input id="mt-dias-manual" type="checkbox" class="w-3.5 h-3.5" onchange="mtToggleDiasManual()">
+                        Fijar a mano
+                    </label>
+                </div>
                 <input id="mt-dias" type="number" min="1" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm" oninput="mtCalcBuf()">
                 <p class="text-xs text-slate-400 mt-1" id="mt-dias-nota"></p>
             </div>
@@ -396,10 +402,18 @@
         </div>
         <div class="border-t border-slate-100 pt-3">
             <label class="text-xs font-bold text-amber-700 uppercase block mb-1">🔒 Compuerta real (bloqueo de Goldratt)</label>
-            <p class="text-xs text-slate-400 mb-2">Esta tarea NO puede avanzar de verdad hasta que la elegida esté COMPLETADA, sin importar la fecha planificada.</p>
+            <p class="text-xs text-slate-400 mb-2">Esta tarea NO puede avanzar de verdad hasta que se cumpla la condición elegida, sin importar la fecha planificada.</p>
+            <div class="flex gap-2 mb-2">
+                <button id="mt-dura-tab-tarea" onclick="mtDuraTab('tarea')" class="flex-1 text-xs font-bold py-1.5 rounded-lg border-2 border-amber-400 bg-amber-50 text-amber-800">Tarea completa</button>
+                <button id="mt-dura-tab-item" onclick="mtDuraTab('item')" class="flex-1 text-xs font-bold py-1.5 rounded-lg border-2 border-slate-200 text-slate-500">Ítem de kit puntual</button>
+            </div>
             <select id="mt-dependedura" class="w-full border-2 border-amber-200 rounded-xl p-2 focus:border-amber-500 outline-none text-sm">
                 <option value="">Sin compuerta — arranca según fecha planificada</option>
             </select>
+            <select id="mt-dependedura-item" class="w-full border-2 border-amber-200 rounded-xl p-2 focus:border-amber-500 outline-none text-sm" style="display:none;">
+                <option value="">Sin compuerta — arranca según fecha planificada</option>
+            </select>
+            <p class="text-xs text-slate-400 mt-1">Ej: esta tarea no arranca hasta que el ítem "corte de chapa" del kit de otra tarea esté marcado como listo.</p>
         </div>
         <div class="flex gap-2 pt-2">
             <button onclick="guardarTarea()" class="flex-1 bg-violet-600 text-white font-bold py-2 rounded-xl hover:bg-violet-700">Guardar</button>
@@ -1301,7 +1315,10 @@ async function guardarProyecto(estado) {
 }
 
 // ─── Modal editar tarea ───────────────────────────────────────────────────────
+let mtTareaActual = null;
+
 function abrirModalTarea(t) {
+    mtTareaActual = t;
     document.getElementById('mt-id').value     = t.id;
     document.getElementById('mt-nombre').value = t.nombre;
     document.getElementById('mt-dias').value   = t.diasHabiles;
@@ -1310,16 +1327,11 @@ function abrirModalTarea(t) {
     mtCalcBuf();
 
     // Si la tarea tiene kit con ítems, los días se calculan solos a partir de
-    // ellos (ver botón ✏️ en cada ítem del kit) — el campo queda de solo lectura.
+    // ellos — salvo que el jefe haya activado "Fijar a mano" para esta tarea
+    // (útil cuando hay tiempos no representados ítem por ítem, ej. secado).
     const tieneKit = (t.KitItems || []).length > 0;
-    const inputDias = document.getElementById('mt-dias');
-    inputDias.disabled = tieneKit;
-    inputDias.className = tieneKit
-        ? 'w-full border-2 border-slate-100 bg-slate-50 text-slate-500 rounded-xl p-2 text-sm'
-        : 'w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm';
-    document.getElementById('mt-dias-nota').textContent = tieneKit
-        ? 'Calculado desde los ítems del kit — editá cada ítem para cambiarlo.'
-        : '';
+    document.getElementById('mt-dias-manual').checked = !!t.diasManual;
+    mtAplicarBloqueoDias(tieneKit, !!t.diasManual);
 
     // Poblar lista de posibles predecesoras: todas las tareas de la misma fase
     // del proyecto actual, excepto ella misma (no puede depender de sí misma).
@@ -1338,14 +1350,69 @@ function abrirModalTarea(t) {
         document.getElementById('mt-desfasaje-wrap').style.display = sel.value ? 'flex' : 'none';
     };
 
-    // Compuerta dura: puede depender de CUALQUIER tarea, no solo de la misma fase
-    // (ej: una tarea de ejecución puede estar bloqueada hasta que cierre una preliminar).
+    // Compuerta dura — tarea completa: puede depender de CUALQUIER tarea, no
+    // solo de la misma fase (ej: ejecución bloqueada hasta cerrar una preliminar).
     const selDura = document.getElementById('mt-dependedura');
     const candidatasDura = todasLasTareas.filter(x => x.id !== t.id);
     selDura.innerHTML = '<option value="">Sin compuerta — arranca según fecha planificada</option>' +
         candidatasDura.map(x => `<option value="${x.id}" ${String(t.dependeDuroId)===String(x.id)?'selected':''}>${x.nombre} (${x.fase==='PRELIMINAR'?'preliminar':'ejecución'})</option>`).join('');
 
+    // Compuerta dura — ítem puntual de kit: junta TODOS los ítems de TODAS las
+    // tareas del proyecto (menos los de esta misma tarea) para poder elegir
+    // "esta tarea no arranca hasta que tal ítem de tal otra tarea esté listo".
+    const selDuraItem = document.getElementById('mt-dependedura-item');
+    const itemsDisponibles = [];
+    todasLasTareas.forEach(x => {
+        if (x.id === t.id) return;
+        (x.KitItems || []).forEach(item => {
+            itemsDisponibles.push({ id: item.id, label: `${item.descripcion} (kit de "${x.nombre}")` });
+        });
+    });
+    selDuraItem.innerHTML = '<option value="">Sin compuerta — arranca según fecha planificada</option>' +
+        itemsDisponibles.map(i => `<option value="${i.id}" ${String(t.dependeDuroItemId)===String(i.id)?'selected':''}>${i.label}</option>`).join('');
+
+    // Mostrar la pestaña correcta según qué tenga cargado la tarea
+    mtDuraTab(t.dependeDuroItemId ? 'item' : 'tarea');
+
     document.getElementById('modal-tarea').classList.remove('hidden');
+}
+
+function mtAplicarBloqueoDias(tieneKit, esManual) {
+    const inputDias = document.getElementById('mt-dias');
+    const bloqueado = tieneKit && !esManual;
+    inputDias.disabled = bloqueado;
+    inputDias.className = bloqueado
+        ? 'w-full border-2 border-slate-100 bg-slate-50 text-slate-500 rounded-xl p-2 text-sm'
+        : 'w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm';
+    document.getElementById('mt-dias-nota').textContent = bloqueado
+        ? 'Calculado desde los ítems del kit. Si la tarea dura más (ej. por tiempos de espera), activá "Fijar a mano".'
+        : (tieneKit ? 'Días fijados a mano — no se recalculan desde el kit.' : '');
+}
+
+function mtToggleDiasManual() {
+    const tieneKit = (mtTareaActual?.KitItems || []).length > 0;
+    const esManual = document.getElementById('mt-dias-manual').checked;
+    mtAplicarBloqueoDias(tieneKit, esManual);
+}
+
+function mtDuraTab(cual) {
+    const tabTarea = document.getElementById('mt-dura-tab-tarea');
+    const tabItem  = document.getElementById('mt-dura-tab-item');
+    const selTarea = document.getElementById('mt-dependedura');
+    const selItem  = document.getElementById('mt-dependedura-item');
+    if (cual === 'item') {
+        tabItem.className  = 'flex-1 text-xs font-bold py-1.5 rounded-lg border-2 border-amber-400 bg-amber-50 text-amber-800';
+        tabTarea.className = 'flex-1 text-xs font-bold py-1.5 rounded-lg border-2 border-slate-200 text-slate-500';
+        selItem.style.display  = 'block';
+        selTarea.style.display = 'none';
+        selTarea.value = '';
+    } else {
+        tabTarea.className = 'flex-1 text-xs font-bold py-1.5 rounded-lg border-2 border-amber-400 bg-amber-50 text-amber-800';
+        tabItem.className  = 'flex-1 text-xs font-bold py-1.5 rounded-lg border-2 border-slate-200 text-slate-500';
+        selTarea.style.display = 'block';
+        selItem.style.display  = 'none';
+        selItem.value = '';
+    }
 }
 
 function cerrarModalTarea() { document.getElementById('modal-tarea').classList.add('hidden'); }
@@ -1392,12 +1459,14 @@ async function guardarTarea() {
     const id     = document.getElementById('mt-id').value;
     const nombre = document.getElementById('mt-nombre').value.trim().toUpperCase();
     const inputDias = document.getElementById('mt-dias');
+    const diasManual = document.getElementById('mt-dias-manual').checked;
     const dias   = inputDias.disabled ? undefined : parseInt(inputDias.value);
     const avance = parseInt(document.getElementById('mt-avance').value);
     const predecesoraId = document.getElementById('mt-predecesora').value || null;
     const desfasajeDias = parseInt(document.getElementById('mt-desfasaje').value) || 0;
-    const dependeDuroId = document.getElementById('mt-dependedura').value || null;
-    const body = { nombre, avancePct: avance, predecesoraId, desfasajeDias, dependeDuroId };
+    const dependeDuroId     = document.getElementById('mt-dependedura').value || null;
+    const dependeDuroItemId = document.getElementById('mt-dependedura-item').value || null;
+    const body = { nombre, avancePct: avance, predecesoraId, desfasajeDias, diasManual, dependeDuroId, dependeDuroItemId };
     if (dias !== undefined) body.diasHabiles = dias;
     await fetch(`/herreria/tareas/${id}`, {
         method:'PUT', headers:{'Content-Type':'application/json'},

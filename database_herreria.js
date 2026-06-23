@@ -37,6 +37,12 @@ const Tarea = sequelize.define('TareaHerreria', {
     // PENDIENTE | EN_PROCESO | COMPLETADA | PAUSADA | ESPERA |
     // ESPERANDO_PRELIMINAR | ESPERANDO_DEPENDENCIA
     diasHabiles:  { type: DataTypes.INTEGER, defaultValue: 1  },
+    // diasManual: si está en true, diasHabiles es un número que vos fijaste a mano
+    // y el sistema NO lo recalcula desde el kit, aunque la tarea tenga ítems con
+    // sus propios días. Útil cuando la tarea tiene tiempos (espera, secado, etc.)
+    // que no están representados ítem por ítem — la suma del kit puede ser menor
+    // a la duración real de la tarea.
+    diasManual:   { type: DataTypes.BOOLEAN, defaultValue: false },
     bufferDias:   { type: DataTypes.INTEGER, defaultValue: 0  },
     avancePct:    { type: DataTypes.INTEGER, defaultValue: 0  },
     orden:        { type: DataTypes.INTEGER, defaultValue: 0  },
@@ -61,6 +67,13 @@ const Tarea = sequelize.define('TareaHerreria', {
     //   Distinto de predecesoraId: ese solo calcula CUÁNDO se planifica el inicio;
     //   este bloquea el AVANCE REAL si la condición no se cumple — es la compuerta.
     dependeDuroId:  { type: DataTypes.INTEGER, allowNull: true },
+    // dependeDuroItemId: alternativa más fina — en vez de depender de que OTRA
+    // TAREA completa esté terminada, depende de que un ÍTEM PUNTUAL del kit de
+    // otra tarea esté marcado como completado. Por ejemplo: la tarea "Pintura"
+    // no puede arrancar hasta que el ítem "corte de chapa" del kit de la tarea
+    // "Prensamblado" esté listo, sin importar el resto del kit de esa tarea.
+    // Solo uno de los dos (dependeDuroId / dependeDuroItemId) debería usarse a la vez.
+    dependeDuroItemId: { type: DataTypes.INTEGER, allowNull: true },
 }, { tableName: 'TareasHerreria', timestamps: true });
 
 // ── Kit (ítem de compuerta por tarea) ─────────────────────────────────────────
@@ -100,7 +113,7 @@ const Historial = sequelize.define('HistorialHerreria', {
 Proyecto.hasMany(Tarea,     { foreignKey: 'proyectoId', onDelete: 'CASCADE', as: 'Tareas' });
 Tarea.belongsTo(Proyecto,   { foreignKey: 'proyectoId' });
 Tarea.hasMany(KitItem,      { foreignKey: 'tareaId',    onDelete: 'CASCADE', as: 'KitItems' });
-KitItem.belongsTo(Tarea,    { foreignKey: 'tareaId' });
+KitItem.belongsTo(Tarea,    { foreignKey: 'tareaId', as: 'Tarea' });
 Proyecto.hasMany(Historial, { foreignKey: 'proyectoId', onDelete: 'CASCADE', as: 'Historials' });
 Historial.belongsTo(Proyecto,{ foreignKey: 'proyectoId' });
 
