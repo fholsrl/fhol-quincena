@@ -63,6 +63,19 @@ const KitItem = sequelize.define('KitItemHerreria', {
     completadoPor:{ type: DataTypes.STRING,  allowNull: true  },
     completadoEn: { type: DataTypes.DATE,    allowNull: true  },
     esSugerida:   { type: DataTypes.BOOLEAN, defaultValue: false },
+    // ── Días, tipo y paralelismo del ítem ────────────────────────────────────
+    // La restricción real muchas veces no es la tarea entera, sino un ítem
+    // puntual dentro de ella (ej: "ajuste de chapa" depende de un proveedor,
+    // mientras "corte" y "armado" son rápidos). Cada ítem tiene su propia
+    // duración; la suma de los ítems define el total de días de la tarea.
+    diasHabiles:  { type: DataTypes.INTEGER, defaultValue: 1 },
+    esRestriccion:{ type: DataTypes.BOOLEAN, defaultValue: false },
+    // Mismo mecanismo de paralelismo que las tareas: si predecesoraId es null,
+    // el ítem arranca al inicio de la tarea. Si tiene predecesora, arranca
+    // desfasajeDias después de que ARRANCÓ ese otro ítem (permite ítems en
+    // simultáneo el mismo día, o desfasados parcialmente).
+    predecesoraId:{ type: DataTypes.INTEGER, allowNull: true },
+    desfasajeDias:{ type: DataTypes.INTEGER, defaultValue: 0 },
 }, { tableName: 'KitItemsHerreria', timestamps: false });
 
 // ── Historial de cambios ──────────────────────────────────────────────────────

@@ -224,6 +224,51 @@
 
 </div><!-- fin max-w -->
 
+<!-- MODAL EDITAR ÍTEM DE KIT -->
+<div id="modal-kit-item" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+        <div class="flex justify-between items-center border-b pb-3">
+            <h3 class="text-lg font-black text-slate-800" id="mk-titulo">Ítem del kit</h3>
+            <button onclick="cerrarModalKitItem()" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">✕</button>
+        </div>
+        <input type="hidden" id="mk-id">
+        <input type="hidden" id="mk-tarea-id">
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Descripción</label>
+            <input id="mk-descripcion" type="text" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Días hábiles</label>
+                <input id="mk-dias" type="number" min="1" value="1" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm">
+            </div>
+            <div class="flex items-end pb-1">
+                <label class="flex items-center gap-2 text-sm font-bold text-amber-700">
+                    <input id="mk-restriccion" type="checkbox" class="w-4 h-4">
+                    ⚠️ Es restricción
+                </label>
+            </div>
+        </div>
+        <p class="text-xs text-slate-400">Marcá esta opción si ESTE ítem en particular es lo que realmente traba la tarea (ej: depende de un proveedor), aunque el resto de la tarea sea rápido.</p>
+        <div class="border-t border-slate-100 pt-3">
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Simultaneidad / desfasaje</label>
+            <p class="text-xs text-slate-400 mb-2">Si este ítem va en paralelo con otro del mismo kit, elegí de cuál depende.</p>
+            <select id="mk-predecesora" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm mb-2">
+                <option value="">Sin dependencia (arranca al inicio de la tarea)</option>
+            </select>
+            <div class="flex items-center gap-2" id="mk-desfasaje-wrap" style="display:none;">
+                <span class="text-xs text-slate-500 font-bold">Arranca</span>
+                <input id="mk-desfasaje" type="number" min="0" value="0" class="w-20 border-2 border-slate-200 rounded-xl p-2 text-sm text-center focus:border-violet-500 outline-none">
+                <span class="text-xs text-slate-500">días hábiles después (0 = mismo día)</span>
+            </div>
+        </div>
+        <div class="flex gap-2 pt-2">
+            <button onclick="guardarKitItem()" class="flex-1 bg-violet-600 text-white font-bold py-2 rounded-xl hover:bg-violet-700">Guardar</button>
+            <button onclick="cerrarModalKitItem()" class="flex-1 bg-slate-100 text-slate-700 font-bold py-2 rounded-xl hover:bg-slate-200">Cancelar</button>
+        </div>
+    </div>
+</div>
+
 <!-- MODAL EDITAR PROYECTO -->
 <div id="modal-proyecto" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
     <div class="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
@@ -270,6 +315,7 @@
             <div>
                 <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Días hábiles</label>
                 <input id="mt-dias" type="number" min="1" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm" oninput="mtCalcBuf()">
+                <p class="text-xs text-slate-400 mt-1" id="mt-dias-nota"></p>
             </div>
             <div>
                 <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Buffer (30%)</label>
@@ -642,7 +688,10 @@ function tarjetaTarea(t, p) {
                 ${item.completado?'<svg class="w-3 h-3 text-white m-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>':''}
             </div>
             <span class="text-xs flex-1 ${item.completado?'line-through text-slate-400':'text-slate-700'}">${item.descripcion}</span>
+            ${item.esRestriccion ? `<span class="text-xs font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">⚠️ restricción</span>` : ''}
+            <span class="text-xs text-slate-400">${item.diasHabiles||1}d${item.predecesoraId ? ` · +${item.desfasajeDias||0}d desde otro ítem` : ''}</span>
             ${item.completadoPor?`<span class="text-xs text-slate-400">${item.completadoPor}</span>`:''}
+            ${esAdmin?`<button onclick='abrirModalKitItem(${JSON.stringify(item).replace(/'/g,"&apos;")}, ${t.id})' class="text-slate-300 hover:text-violet-600 text-xs">✏️</button>`:''}
         </div>`).join('');
 
     const kitStatus = t.kitTotal
@@ -741,13 +790,66 @@ async function toggleKit(itemId, completado) {
     renderDetalle();
 }
 
-async function abrirAgregarKit(tareaId) {
-    const desc = prompt('Descripción del ítem del kit:');
-    if (!desc || !desc.trim()) return;
-    await fetch('/herreria/kit', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ tareaId, descripcion: desc.trim() })
-    });
+// Reemplaza el viejo prompt() por el modal completo de ítem de kit
+function abrirAgregarKit(tareaId) {
+    abrirModalKitItem(null, tareaId);
+}
+
+function poblarPredecesorasKit(tareaId, excluirItemId) {
+    const t = (proyectoActual.tareasPreliminares||[]).concat(proyectoActual.tareasEjecucion||[]).find(x => x.id === tareaId)
+        || (proyectoActual.Tareas||[]).find(x => x.id === tareaId);
+    const items = (t?.KitItems || []).filter(it => it.id !== excluirItemId);
+    return items;
+}
+
+function abrirModalKitItem(item, tareaId) {
+    document.getElementById('mk-id').value         = item ? item.id : '';
+    document.getElementById('mk-tarea-id').value   = tareaId;
+    document.getElementById('mk-titulo').textContent = item ? 'Editar ítem del kit' : 'Nuevo ítem del kit';
+    document.getElementById('mk-descripcion').value  = item ? item.descripcion : '';
+    document.getElementById('mk-dias').value         = item ? (item.diasHabiles || 1) : 1;
+    document.getElementById('mk-restriccion').checked = item ? !!item.esRestriccion : false;
+
+    const candidatas = poblarPredecesorasKit(tareaId, item ? item.id : null);
+    const sel = document.getElementById('mk-predecesora');
+    sel.innerHTML = '<option value="">Sin dependencia (arranca al inicio de la tarea)</option>' +
+        candidatas.map(c => `<option value="${c.id}" ${item && item.predecesoraId===c.id?'selected':''}>${c.descripcion}</option>`).join('');
+    document.getElementById('mk-desfasaje').value = item ? (item.desfasajeDias || 0) : 0;
+    document.getElementById('mk-desfasaje-wrap').style.display = (item && item.predecesoraId) ? 'flex' : 'none';
+    sel.onchange = () => {
+        document.getElementById('mk-desfasaje-wrap').style.display = sel.value ? 'flex' : 'none';
+    };
+
+    document.getElementById('modal-kit-item').classList.remove('hidden');
+}
+
+function cerrarModalKitItem() {
+    document.getElementById('modal-kit-item').classList.add('hidden');
+}
+
+async function guardarKitItem() {
+    const id       = document.getElementById('mk-id').value;
+    const tareaId  = document.getElementById('mk-tarea-id').value;
+    const descripcion    = document.getElementById('mk-descripcion').value.trim();
+    const diasHabiles     = parseInt(document.getElementById('mk-dias').value) || 1;
+    const esRestriccion   = document.getElementById('mk-restriccion').checked;
+    const predecesoraId   = document.getElementById('mk-predecesora').value || null;
+    const desfasajeDias   = parseInt(document.getElementById('mk-desfasaje').value) || 0;
+
+    if (!descripcion) { alert('La descripción es obligatoria.'); return; }
+
+    if (id) {
+        await fetch(`/herreria/kit/${id}/detalle`, {
+            method:'PUT', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ descripcion, diasHabiles, esRestriccion, predecesoraId, desfasajeDias })
+        });
+    } else {
+        await fetch('/herreria/kit', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ tareaId, descripcion, diasHabiles, esRestriccion, predecesoraId, desfasajeDias })
+        });
+    }
+    cerrarModalKitItem();
     const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
     proyectoActual = await res.json();
     renderDetalle();
@@ -1051,6 +1153,18 @@ function abrirModalTarea(t) {
     document.getElementById('mt-avance-num').textContent = t.avancePct + '%';
     mtCalcBuf();
 
+    // Si la tarea tiene kit con ítems, los días se calculan solos a partir de
+    // ellos (ver botón ✏️ en cada ítem del kit) — el campo queda de solo lectura.
+    const tieneKit = (t.KitItems || []).length > 0;
+    const inputDias = document.getElementById('mt-dias');
+    inputDias.disabled = tieneKit;
+    inputDias.className = tieneKit
+        ? 'w-full border-2 border-slate-100 bg-slate-50 text-slate-500 rounded-xl p-2 text-sm'
+        : 'w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm';
+    document.getElementById('mt-dias-nota').textContent = tieneKit
+        ? 'Calculado desde los ítems del kit — editá cada ítem para cambiarlo.'
+        : '';
+
     // Poblar lista de posibles predecesoras: todas las tareas de la misma fase
     // del proyecto actual, excepto ella misma (no puede depender de sí misma).
     const sel = document.getElementById('mt-predecesora');
@@ -1114,13 +1228,16 @@ function mtCalcBuf() {
 async function guardarTarea() {
     const id     = document.getElementById('mt-id').value;
     const nombre = document.getElementById('mt-nombre').value.trim().toUpperCase();
-    const dias   = parseInt(document.getElementById('mt-dias').value);
+    const inputDias = document.getElementById('mt-dias');
+    const dias   = inputDias.disabled ? undefined : parseInt(inputDias.value);
     const avance = parseInt(document.getElementById('mt-avance').value);
     const predecesoraId = document.getElementById('mt-predecesora').value || null;
     const desfasajeDias = parseInt(document.getElementById('mt-desfasaje').value) || 0;
+    const body = { nombre, avancePct: avance, predecesoraId, desfasajeDias };
+    if (dias !== undefined) body.diasHabiles = dias;
     await fetch(`/herreria/tareas/${id}`, {
         method:'PUT', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ nombre, diasHabiles: dias, avancePct: avance, predecesoraId, desfasajeDias })
+        body: JSON.stringify(body)
     });
     cerrarModalTarea();
     const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
@@ -1285,7 +1402,7 @@ function descargarCalendarioExcel() {
 }
 
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { cerrarModalTarea(); cerrarModalProyecto(); }
+    if (e.key === 'Escape') { cerrarModalTarea(); cerrarModalProyecto(); cerrarModalKitItem(); }
 });
 </script>
 </body>

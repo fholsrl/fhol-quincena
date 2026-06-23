@@ -146,15 +146,30 @@ router.put('/proyectos/:id', proteger, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Calcula la duración real de una tarea a partir de los días de cada ítem de su
+// kit, respetando paralelismo: si dos ítems van el mismo día (desfasaje 0), no se
+// suman ambos al total — la duración de la tarea es el punto más lejano en el
+// tiempo que alcanza cualquier ítem (igual que un Gantt: el camino más largo).
+function calcularDiasDesdeKit(items) {
+    if (!items || !items.length) return null; // sin kit, no se puede calcular — usar el valor manual
+    const fechaBase = new Date(2000, 0, 1); // fecha arbitraria fija, solo para medir distancias relativas
+    const fechas = calendarizarPorDependencias(items, fechaBase);
+    let maxFin = fechaBase;
+    items.forEach(it => {
+        const inicio = fechas[it.id] || fechaBase;
+        const fin = sumarDiasHabiles(inicio, Math.max(0, (it.diasHabiles || 1) - 1));
+        if (fin > maxFin) maxFin = fin;
+    });
+    // Diferencia en días hábiles entre fechaBase y maxFin, +1 para incluir el día de inicio
+    let dias = 0, cursor = new Date(fechaBase);
+    while (cursor < maxFin) {
+        cursor.setDate(cursor.getDate() + 1);
+        if (cursor.getDay() !== 0 && cursor.getDay() !== 6) dias++;
+    }
+    return dias + 1;
+}
+
 // POST /herreria/proyectos/:id/activar
-// Calendariza un conjunto de tareas según sus dependencias (predecesoraId + desfasajeDias)
-// en lugar de un cursor puramente secuencial. Reglas:
-//  - Tarea SIN predecesora → arranca en `fechaBase` (la fecha de liberación de su fase).
-//  - Tarea CON predecesora → arranca `desfasajeDias` días hábiles después de que
-//    ARRANCÓ la predecesora (no de que termine) — permite paralelismo y desfasajes
-//    parciales: una tarea larga puede tener varias cortas empezando en distintos puntos.
-//  - Si la predecesora todavía no tiene fecha calculada al momento de procesar esta
-//    tarea (por el orden del array), se reintenta en una segunda pasada.
 function calendarizarPorDependencias(tareas, fechaBase) {
     const porId = {};
     tareas.forEach(t => { porId[t.id] = t; });
@@ -425,6 +440,20 @@ router.post('/tareas/:id/activar', proteger, async (req, res) => {
 // ── KIT ───────────────────────────────────────────────────────────────────────
 
 // PUT /herreria/kit/:id — marcar o desmarcar ítem
+// Recalcula los días totales de una tarea a partir de su kit (si tiene ítems
+// con días propios cargados) y actualiza buffer en consecuencia.
+async function recalcularDiasTarea(tareaId) {
+    const t = await Tarea.findByPk(tareaId, { include: [{ model: KitItem, as: 'KitItems' }] });
+    if (!t || !t.KitItems || !t.KitItems.length) return;
+    const dias = calcularDiasDesdeKit(t.KitItems);
+    if (dias === null) return;
+    t.diasHabiles = dias;
+    t.bufferDias  = calcBuf(dias, t.fase);
+    await t.save();
+    await recalcularTotales(t.proyectoId);
+}
+
+// PUT /herreria/kit/:id — marcar o desmarcar ítem como completado
 router.put('/kit/:id', proteger, async (req, res) => {
     try {
         const item = await KitItem.findByPk(req.params.id, { include: [{ model: Tarea, as: 'Tarea' }] });
@@ -445,12 +474,46 @@ router.put('/kit/:id', proteger, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PUT /herreria/kit/:id/detalle — editar días, si es restricción, predecesora y desfasaje
+// del ítem (solo jefe). Recalcula automáticamente los días totales de la tarea padre.
+router.put('/kit/:id/detalle', proteger, async (req, res) => {
+    try {
+        if (req.session.user.rol !== 'admin')
+            return res.status(403).json({ error: 'Solo el jefe puede editar el detalle del kit' });
+        const item = await KitItem.findByPk(req.params.id, { include: [{ model: Tarea, as: 'Tarea' }] });
+        if (!item) return res.status(404).json({ error: 'No encontrado' });
+
+        const { diasHabiles, esRestriccion, predecesoraId, desfasajeDias, descripcion } = req.body;
+        if (descripcion)        item.descripcion   = descripcion;
+        if (diasHabiles)        item.diasHabiles   = parseInt(diasHabiles);
+        if (esRestriccion !== undefined) item.esRestriccion = !!esRestriccion;
+        if (predecesoraId !== undefined) item.predecesoraId = predecesoraId || null;
+        if (desfasajeDias !== undefined) item.desfasajeDias = parseInt(desfasajeDias) || 0;
+        await item.save();
+
+        await recalcularDiasTarea(item.tareaId);
+        await log(item.Tarea.proyectoId,
+            `Kit "${item.descripcion}" actualizado${esRestriccion ? ' — marcado como RESTRICCIÓN' : ''}`,
+            req.session.user.username);
+
+        const t = await Tarea.findByPk(item.tareaId);
+        res.json({ ok: true, item, diasHabilesTarea: t.diasHabiles, bufferDiasTarea: t.bufferDias });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /herreria/kit — agregar ítem al kit de una tarea
 router.post('/kit', proteger, async (req, res) => {
     try {
-        const { tareaId, descripcion } = req.body;
-        const item = await KitItem.create({ tareaId, descripcion });
+        const { tareaId, descripcion, diasHabiles, esRestriccion, predecesoraId, desfasajeDias } = req.body;
+        const item = await KitItem.create({
+            tareaId, descripcion,
+            diasHabiles:   diasHabiles ? parseInt(diasHabiles) : 1,
+            esRestriccion: !!esRestriccion,
+            predecesoraId: predecesoraId || null,
+            desfasajeDias: parseInt(desfasajeDias) || 0,
+        });
         const t = await Tarea.findByPk(tareaId);
+        await recalcularDiasTarea(tareaId);
         await log(t.proyectoId, `Kit agregado: "${descripcion}"`, req.session.user.username);
         res.json(item);
     } catch (e) { res.status(500).json({ error: e.message }); }
