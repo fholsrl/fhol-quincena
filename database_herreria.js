@@ -34,7 +34,8 @@ const Tarea = sequelize.define('TareaHerreria', {
     tipo:         { type: DataTypes.STRING,  defaultValue: 'NORMAL' },
     // NORMAL | RESTRICCION | ESPERA  (solo aplica en fase EJECUCION)
     estado:       { type: DataTypes.STRING,  defaultValue: 'PENDIENTE' },
-    // PENDIENTE | EN_PROCESO | COMPLETADA | PAUSADA | ESPERA | ESPERANDO_PRELIMINAR
+    // PENDIENTE | EN_PROCESO | COMPLETADA | PAUSADA | ESPERA |
+    // ESPERANDO_PRELIMINAR | ESPERANDO_DEPENDENCIA
     diasHabiles:  { type: DataTypes.INTEGER, defaultValue: 1  },
     bufferDias:   { type: DataTypes.INTEGER, defaultValue: 0  },
     avancePct:    { type: DataTypes.INTEGER, defaultValue: 0  },
@@ -45,7 +46,7 @@ const Tarea = sequelize.define('TareaHerreria', {
     cerradaEn:    { type: DataTypes.DATE,    allowNull: true  },
     cerradaPor:   { type: DataTypes.STRING,  allowNull: true  },
     diasHabilesConsumidos: { type: DataTypes.INTEGER, defaultValue: 0 },
-    // ── Paralelismo y desfasaje ───────────────────────────────────────────────
+    // ── Paralelismo y desfasaje (PLANIFICACIÓN — solo afecta la fecha calculada) ──
     // predecesoraId: ID de la tarea de la que depende el inicio de esta (misma fase).
     //   Si es null, la tarea arranca apenas se libera la compuerta (comportamiento actual).
     // desfasajeDias: cuántos días hábiles después de que ARRANCA la predecesora,
@@ -54,6 +55,12 @@ const Tarea = sequelize.define('TareaHerreria', {
     //   varias tareas cortas empezando y terminando en distintos puntos de su rango.
     predecesoraId:  { type: DataTypes.INTEGER, allowNull: true },
     desfasajeDias:  { type: DataTypes.INTEGER, defaultValue: 0 },
+    // ── Dependencia dura (COMPUERTA REAL — regla de flujo de Goldratt) ───────────
+    // dependeDuroId: ID de la tarea que DEBE estar COMPLETADA para que esta pueda
+    //   pasar a EN_PROCESO de verdad, sin importar qué fecha tenga calculada.
+    //   Distinto de predecesoraId: ese solo calcula CUÁNDO se planifica el inicio;
+    //   este bloquea el AVANCE REAL si la condición no se cumple — es la compuerta.
+    dependeDuroId:  { type: DataTypes.INTEGER, allowNull: true },
 }, { tableName: 'TareasHerreria', timestamps: true });
 
 // ── Kit (ítem de compuerta por tarea) ─────────────────────────────────────────

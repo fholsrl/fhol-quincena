@@ -224,6 +224,61 @@
 
 </div><!-- fin max-w -->
 
+<!-- MODAL NUEVA TAREA (desde el detalle del proyecto, p. ej. en BORRADOR) -->
+<div id="modal-nueva-tarea" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div class="flex justify-between items-center border-b pb-3">
+            <h3 class="text-lg font-black text-slate-800">＋ Nueva tarea</h3>
+            <button onclick="cerrarModalNuevaTarea()" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">✕</button>
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Nombre</label>
+            <input id="nt-nombre" type="text" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none uppercase text-sm">
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Fase</label>
+            <div class="flex gap-2">
+                <button id="nt-fase-prelim" onclick="ntSelFase('PRELIMINAR')" class="flex-1 border-2 border-slate-200 rounded-xl py-2 text-sm font-bold">📝 Preliminar</button>
+                <button id="nt-fase-ejec" onclick="ntSelFase('EJECUCION')" class="flex-1 border-2 border-violet-400 bg-violet-50 text-violet-700 rounded-xl py-2 text-sm font-bold">🔧 Ejecución</button>
+            </div>
+        </div>
+        <div id="nt-tipo-wrap">
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Tipo</label>
+            <div class="flex gap-2">
+                <button id="nt-tipo-normal" onclick="ntSelTipo('NORMAL')" class="flex-1 border-2 border-slate-300 bg-slate-50 rounded-xl py-2 text-sm font-bold">Normal</button>
+                <button id="nt-tipo-restriccion" onclick="ntSelTipo('RESTRICCION')" class="flex-1 border-2 border-slate-200 rounded-xl py-2 text-sm font-bold">Restricción</button>
+                <button id="nt-tipo-espera" onclick="ntSelTipo('ESPERA')" class="flex-1 border-2 border-slate-200 rounded-xl py-2 text-sm font-bold">En espera</button>
+            </div>
+        </div>
+        <div>
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Días hábiles</label>
+            <input id="nt-dias" type="number" min="1" value="1" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm">
+        </div>
+        <div class="border-t border-slate-100 pt-3">
+            <label class="text-xs font-bold text-slate-500 uppercase block mb-1">Simultaneidad / desfasaje (planificación)</label>
+            <select id="nt-predecesora" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-violet-500 outline-none text-sm mb-2">
+                <option value="">Sin dependencia</option>
+            </select>
+            <div class="flex items-center gap-2" id="nt-desfasaje-wrap" style="display:none;">
+                <span class="text-xs text-slate-500 font-bold">Arranca</span>
+                <input id="nt-desfasaje" type="number" min="0" value="0" class="w-20 border-2 border-slate-200 rounded-xl p-2 text-sm text-center focus:border-violet-500 outline-none">
+                <span class="text-xs text-slate-500">días después (0 = mismo día)</span>
+            </div>
+        </div>
+        <div class="border-t border-slate-100 pt-3">
+            <label class="text-xs font-bold text-amber-700 uppercase block mb-1">🔒 Compuerta real (bloqueo de Goldratt)</label>
+            <p class="text-xs text-slate-400 mb-2">Esta tarea NO puede avanzar de verdad hasta que la elegida esté COMPLETADA, sin importar la fecha planificada.</p>
+            <select id="nt-dependedura" class="w-full border-2 border-amber-200 rounded-xl p-2 focus:border-amber-500 outline-none text-sm">
+                <option value="">Sin compuerta — arranca según fecha planificada</option>
+            </select>
+        </div>
+        <div class="flex gap-2 pt-2">
+            <button onclick="guardarNuevaTarea()" class="flex-1 bg-violet-600 text-white font-bold py-2 rounded-xl hover:bg-violet-700">Agregar tarea</button>
+            <button onclick="cerrarModalNuevaTarea()" class="flex-1 bg-slate-100 text-slate-700 font-bold py-2 rounded-xl hover:bg-slate-200">Cancelar</button>
+        </div>
+    </div>
+</div>
+
 <!-- MODAL EDITAR ÍTEM DE KIT -->
 <div id="modal-kit-item" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
     <div class="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
@@ -338,6 +393,13 @@
                 <input id="mt-desfasaje" type="number" min="0" value="0" class="w-20 border-2 border-slate-200 rounded-xl p-2 text-sm text-center focus:border-violet-500 outline-none">
                 <span class="text-xs text-slate-500">días hábiles después de que arranca la predecesora (0 = mismo día)</span>
             </div>
+        </div>
+        <div class="border-t border-slate-100 pt-3">
+            <label class="text-xs font-bold text-amber-700 uppercase block mb-1">🔒 Compuerta real (bloqueo de Goldratt)</label>
+            <p class="text-xs text-slate-400 mb-2">Esta tarea NO puede avanzar de verdad hasta que la elegida esté COMPLETADA, sin importar la fecha planificada.</p>
+            <select id="mt-dependedura" class="w-full border-2 border-amber-200 rounded-xl p-2 focus:border-amber-500 outline-none text-sm">
+                <option value="">Sin compuerta — arranca según fecha planificada</option>
+            </select>
         </div>
         <div class="flex gap-2 pt-2">
             <button onclick="guardarTarea()" class="flex-1 bg-violet-600 text-white font-bold py-2 rounded-xl hover:bg-violet-700">Guardar</button>
@@ -645,6 +707,16 @@ function renderDetalle() {
         </div>`;
     }
 
+    if (esAdmin) {
+        const enfasis = p.estado === 'BORRADOR'
+            ? 'border-violet-400 text-violet-600 bg-violet-50'
+            : 'border-slate-300 text-slate-400 hover:border-violet-400 hover:text-violet-600';
+        htmlTareas += `
+        <button onclick="abrirModalNuevaTareaDetalle()" class="mt-3 w-full border-2 border-dashed ${enfasis} py-3 rounded-xl font-bold text-sm transition">
+            ＋ Agregar tarea${p.estado === 'BORRADOR' ? ' — el proyecto todavía está en borrador' : ''}
+        </button>`;
+    }
+
     det.innerHTML = htmlTareas || `<div class="text-xs text-slate-400 italic p-4">Sin tareas cargadas.</div>`;
 
     // Historial
@@ -705,15 +777,20 @@ function tarjetaTarea(t, p) {
     const esperandoPreliminar = t.estado === 'ESPERANDO_PRELIMINAR'
         ? `<span class="text-xs font-bold bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full flex items-center gap-1">🔒 Esperando que se cierren las preliminares</span>` : '';
 
+    const esperandoDependencia = t.estado === 'ESPERANDO_DEPENDENCIA'
+        ? `<span class="text-xs font-bold bg-red-100 text-red-800 px-2 py-0.5 rounded-full flex items-center gap-1">🔒 Bloqueada — esperando que termine otra tarea</span>` : '';
+
+    const bloqueada = t.estado === 'ESPERANDO_PRELIMINAR' || t.estado === 'ESPERANDO_DEPENDENCIA';
+
     const activarEspera = t.tipo === 'ESPERA' && t.estado === 'ESPERA' && esAdmin
         ? `<button onclick="activarTareaEspera(${t.id})" class="text-xs bg-green-600 text-white px-3 py-1 rounded-lg font-bold hover:bg-green-700">▶ Activar</button>` : '';
 
-    return `<div class="bg-white rounded-xl shadow border ${t.tipo==='RESTRICCION'?'border-amber-300':t.estado==='ESPERANDO_PRELIMINAR'?'border-orange-200':'border-slate-200'} overflow-hidden ${t.estado==='ESPERANDO_PRELIMINAR'?'opacity-60':''}">
+    return `<div class="bg-white rounded-xl shadow border ${t.tipo==='RESTRICCION'?'border-amber-300':bloqueada?'border-red-200':'border-slate-200'} overflow-hidden ${bloqueada?'opacity-60':''}">
         <div class="p-4">
             <div class="flex justify-between items-start gap-2 flex-wrap">
                 <div>
                     <div class="font-black text-slate-800 text-sm">${t.nombre}</div>
-                    <div class="flex items-center gap-2 mt-1">${tipoBadge}${esperandoPreliminar}${kitStatus}${activarEspera}</div>
+                    <div class="flex items-center gap-2 mt-1">${tipoBadge}${esperandoPreliminar}${esperandoDependencia}${kitStatus}${activarEspera}</div>
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-xs text-slate-500">${t.diasHabiles}d plan · ${t.bufferDias}d buf</span>
@@ -741,13 +818,14 @@ function tarjetaTarea(t, p) {
                 <input type="range" min="0" max="100" value="${fc.avancePct}" step="1"
                     class="flex-1" oninput="actualizarAvance(${t.id},this.value,this)">
                 <span class="text-xs font-bold text-violet-600 w-10 text-right" id="avlbl-${t.id}">${fc.avancePct}%</span>
-            </div>` : (t.tipo !== 'ESPERA' && t.estado !== 'ESPERANDO_PRELIMINAR' && t.estado !== 'PENDIENTE' ? `
+            </div>` : (t.tipo !== 'ESPERA' && !bloqueada && t.estado !== 'PENDIENTE' ? `
             <div class="mt-2 flex items-center gap-2">
                 <input type="range" min="0" max="100" value="${t.avancePct}" step="1"
                     class="flex-1" oninput="actualizarAvance(${t.id},this.value,this)">
                 <span class="text-xs font-bold text-violet-600 w-10 text-right" id="avlbl-${t.id}">${t.avancePct}%</span>
             </div>` : t.estado === 'ESPERANDO_PRELIMINAR' ? `
-            <div class="mt-2 text-xs text-orange-600 italic">Esta tarea de ejecución arranca automáticamente cuando se completen todas las preliminares.</div>` : '')}
+            <div class="mt-2 text-xs text-orange-600 italic">Esta tarea de ejecución arranca automáticamente cuando se completen todas las preliminares.</div>` : t.estado === 'ESPERANDO_DEPENDENCIA' ? `
+            <div class="mt-2 text-xs text-red-600 italic">Esta tarea no puede avanzar hasta que se complete la tarea de la que depende — la compuerta se abre sola cuando eso pase.</div>` : '')}
         </div>
 
         ${(t.KitItems||[]).length ? `
@@ -790,6 +868,84 @@ async function toggleKit(itemId, completado) {
     renderDetalle();
 }
 
+// ─── Modal nueva tarea (desde el detalle del proyecto) ───────────────────────
+let ntFaseSel = 'EJECUCION';
+let ntTipoSel = 'NORMAL';
+
+function abrirModalNuevaTareaDetalle() {
+    document.getElementById('nt-nombre').value = '';
+    document.getElementById('nt-dias').value    = 1;
+    document.getElementById('nt-desfasaje').value = 0;
+    ntSelFase('EJECUCION');
+    ntSelTipo('NORMAL');
+
+    const todasLasTareas = [...(proyectoActual.tareasPreliminares||[]), ...(proyectoActual.tareasEjecucion||[])];
+    const selPred = document.getElementById('nt-predecesora');
+    const selDura = document.getElementById('nt-dependedura');
+    const opciones = todasLasTareas.map(x => `<option value="${x.id}">${x.nombre}</option>`).join('');
+    selPred.innerHTML = '<option value="">Sin dependencia</option>' + opciones;
+    selDura.innerHTML = '<option value="">Sin compuerta — arranca según fecha planificada</option>' + opciones;
+    selPred.onchange = () => {
+        document.getElementById('nt-desfasaje-wrap').style.display = selPred.value ? 'flex' : 'none';
+    };
+    document.getElementById('nt-desfasaje-wrap').style.display = 'none';
+
+    document.getElementById('modal-nueva-tarea').classList.remove('hidden');
+}
+
+function cerrarModalNuevaTarea() {
+    document.getElementById('modal-nueva-tarea').classList.add('hidden');
+}
+
+function ntSelFase(fase) {
+    ntFaseSel = fase;
+    const prelim = document.getElementById('nt-fase-prelim');
+    const ejec   = document.getElementById('nt-fase-ejec');
+    const tipoWrap = document.getElementById('nt-tipo-wrap');
+    if (fase === 'PRELIMINAR') {
+        prelim.className = 'flex-1 border-2 border-violet-400 bg-violet-50 text-violet-700 rounded-xl py-2 text-sm font-bold';
+        ejec.className   = 'flex-1 border-2 border-slate-200 rounded-xl py-2 text-sm font-bold';
+        tipoWrap.style.display = 'none';
+    } else {
+        ejec.className   = 'flex-1 border-2 border-violet-400 bg-violet-50 text-violet-700 rounded-xl py-2 text-sm font-bold';
+        prelim.className = 'flex-1 border-2 border-slate-200 rounded-xl py-2 text-sm font-bold';
+        tipoWrap.style.display = 'block';
+    }
+}
+
+function ntSelTipo(tipo) {
+    ntTipoSel = tipo;
+    ['normal','restriccion','espera'].forEach(t => {
+        document.getElementById('nt-tipo-' + t).className = 'flex-1 border-2 border-slate-200 rounded-xl py-2 text-sm font-bold';
+    });
+    const map = { NORMAL:'normal', RESTRICCION:'restriccion', ESPERA:'espera' };
+    document.getElementById('nt-tipo-' + map[tipo]).className = 'flex-1 border-2 border-slate-300 bg-slate-50 rounded-xl py-2 text-sm font-bold';
+}
+
+async function guardarNuevaTarea() {
+    const nombre = document.getElementById('nt-nombre').value.trim().toUpperCase();
+    if (!nombre) { alert('El nombre es obligatorio.'); return; }
+    const body = {
+        proyectoId: proyectoActual.id,
+        nombre,
+        fase: ntFaseSel,
+        tipo: ntFaseSel === 'PRELIMINAR' ? 'NORMAL' : ntTipoSel,
+        diasHabiles: parseInt(document.getElementById('nt-dias').value) || 1,
+        predecesoraId: document.getElementById('nt-predecesora').value || null,
+        desfasajeDias: parseInt(document.getElementById('nt-desfasaje').value) || 0,
+        dependeDuroId: document.getElementById('nt-dependedura').value || null,
+    };
+    await fetch('/herreria/tareas', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+    });
+    cerrarModalNuevaTarea();
+    const res = await fetch(`/herreria/proyectos/${proyectoActual.id}`);
+    proyectoActual = await res.json();
+    renderDetalle();
+    await cargarProyectos();
+}
+
 // Reemplaza el viejo prompt() por el modal completo de ítem de kit
 function abrirAgregarKit(tareaId) {
     abrirModalKitItem(null, tareaId);
@@ -813,7 +969,7 @@ function abrirModalKitItem(item, tareaId) {
     const candidatas = poblarPredecesorasKit(tareaId, item ? item.id : null);
     const sel = document.getElementById('mk-predecesora');
     sel.innerHTML = '<option value="">Sin dependencia (arranca al inicio de la tarea)</option>' +
-        candidatas.map(c => `<option value="${c.id}" ${item && item.predecesoraId===c.id?'selected':''}>${c.descripcion}</option>`).join('');
+        candidatas.map(c => `<option value="${c.id}" ${item && String(item.predecesoraId)===String(c.id)?'selected':''}>${c.descripcion}</option>`).join('');
     document.getElementById('mk-desfasaje').value = item ? (item.desfasajeDias || 0) : 0;
     document.getElementById('mk-desfasaje-wrap').style.display = (item && item.predecesoraId) ? 'flex' : 'none';
     sel.onchange = () => {
@@ -1174,13 +1330,20 @@ function abrirModalTarea(t) {
     ];
     const candidatas = todasLasTareas.filter(x => x.id !== t.id && x.fase === t.fase);
     sel.innerHTML = '<option value="">Sin dependencia (arranca al liberarse la fase)</option>' +
-        candidatas.map(x => `<option value="${x.id}" ${t.predecesoraId===x.id?'selected':''}>${x.nombre}</option>`).join('');
+        candidatas.map(x => `<option value="${x.id}" ${String(t.predecesoraId)===String(x.id)?'selected':''}>${x.nombre}</option>`).join('');
 
     document.getElementById('mt-desfasaje').value = t.desfasajeDias || 0;
     document.getElementById('mt-desfasaje-wrap').style.display = t.predecesoraId ? 'flex' : 'none';
     sel.onchange = () => {
         document.getElementById('mt-desfasaje-wrap').style.display = sel.value ? 'flex' : 'none';
     };
+
+    // Compuerta dura: puede depender de CUALQUIER tarea, no solo de la misma fase
+    // (ej: una tarea de ejecución puede estar bloqueada hasta que cierre una preliminar).
+    const selDura = document.getElementById('mt-dependedura');
+    const candidatasDura = todasLasTareas.filter(x => x.id !== t.id);
+    selDura.innerHTML = '<option value="">Sin compuerta — arranca según fecha planificada</option>' +
+        candidatasDura.map(x => `<option value="${x.id}" ${String(t.dependeDuroId)===String(x.id)?'selected':''}>${x.nombre} (${x.fase==='PRELIMINAR'?'preliminar':'ejecución'})</option>`).join('');
 
     document.getElementById('modal-tarea').classList.remove('hidden');
 }
@@ -1233,7 +1396,8 @@ async function guardarTarea() {
     const avance = parseInt(document.getElementById('mt-avance').value);
     const predecesoraId = document.getElementById('mt-predecesora').value || null;
     const desfasajeDias = parseInt(document.getElementById('mt-desfasaje').value) || 0;
-    const body = { nombre, avancePct: avance, predecesoraId, desfasajeDias };
+    const dependeDuroId = document.getElementById('mt-dependedura').value || null;
+    const body = { nombre, avancePct: avance, predecesoraId, desfasajeDias, dependeDuroId };
     if (dias !== undefined) body.diasHabiles = dias;
     await fetch(`/herreria/tareas/${id}`, {
         method:'PUT', headers:{'Content-Type':'application/json'},
@@ -1402,7 +1566,7 @@ function descargarCalendarioExcel() {
 }
 
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { cerrarModalTarea(); cerrarModalProyecto(); cerrarModalKitItem(); }
+    if (e.key === 'Escape') { cerrarModalTarea(); cerrarModalProyecto(); cerrarModalKitItem(); cerrarModalNuevaTarea(); }
 });
 </script>
 </body>

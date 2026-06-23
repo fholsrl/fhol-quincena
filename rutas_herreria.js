@@ -201,6 +201,34 @@ function calendarizarPorDependencias(tareas, fechaBase) {
 }
 
 // POST /herreria/proyectos/:id/activar
+// Decide el ESTADO REAL en que debe quedar una tarea al momento de liberarla:
+// si tiene dependeDuroId y esa tarea NO está COMPLETADA, queda bloqueada de
+// verdad (ESPERANDO_DEPENDENCIA) sin importar la fecha calculada — esta es la
+// compuerta real de Goldratt. Si no tiene dependencia dura, o la dependencia
+// ya está completa, pasa a EN_PROCESO normalmente.
+async function estadoSegunDependenciaDura(tarea) {
+    if (!tarea.dependeDuroId) return 'EN_PROCESO';
+    const dep = await Tarea.findByPk(tarea.dependeDuroId);
+    if (dep && dep.estado !== 'COMPLETADA') return 'ESPERANDO_DEPENDENCIA';
+    return 'EN_PROCESO';
+}
+
+// Revisa todas las tareas en ESPERANDO_DEPENDENCIA de un proyecto: si su
+// dependencia dura ya se completó, las libera a EN_PROCESO. Se llama cada vez
+// que una tarea se marca como COMPLETADA, para destrabar en cadena.
+async function liberarDependenciasDuras(proyectoId, usuario) {
+    const tareas = await Tarea.findAll({ where: { proyectoId, estado: 'ESPERANDO_DEPENDENCIA' } });
+    for (const t of tareas) {
+        const dep = await Tarea.findByPk(t.dependeDuroId);
+        if (dep && dep.estado === 'COMPLETADA') {
+            t.estado = 'EN_PROCESO';
+            if (!t.activadaEn) t.activadaEn = new Date();
+            await t.save();
+            await log(proyectoId, `Tarea "${t.nombre}" liberada — su dependencia dura ya se completó`, usuario);
+        }
+    }
+}
+
 router.post('/proyectos/:id/activar', proteger, async (req, res) => {
     try {
         const p = await Proyecto.findByPk(req.params.id, { include: [{ model: Tarea, as: 'Tareas' }] });
@@ -221,7 +249,7 @@ router.post('/proyectos/:id/activar', proteger, async (req, res) => {
         const fechasPrelim = calendarizarPorDependencias(preliminares, new Date());
         for (const t of preliminares) {
             t.activadaEn = fechasPrelim[t.id];
-            t.estado     = 'EN_PROCESO';
+            t.estado     = await estadoSegunDependenciaDura(t);
             await t.save();
         }
 
@@ -233,7 +261,7 @@ router.post('/proyectos/:id/activar', proteger, async (req, res) => {
             const fechasEjec = calendarizarPorDependencias(elegibles, new Date());
             for (const t of elegibles) {
                 t.activadaEn = fechasEjec[t.id];
-                t.estado     = 'EN_PROCESO';
+                t.estado     = await estadoSegunDependenciaDura(t);
                 await t.save();
             }
         } else {
@@ -251,7 +279,8 @@ router.post('/proyectos/:id/activar', proteger, async (req, res) => {
 
 // Helper: revisa si todas las preliminares de un proyecto están completadas,
 // y si es así, libera (activa) las tareas de ejecución que estaban esperando,
-// calendarizándolas según sus dependencias (paralelismo/desfasaje).
+// calendarizándolas según sus dependencias (paralelismo/desfasaje), respetando
+// además la compuerta dura si la tienen.
 async function verificarCompuertaPreliminar(proyectoId, usuario) {
     const tareas = await Tarea.findAll({ where: { proyectoId } });
     const preliminares = tareas.filter(t => t.fase === 'PRELIMINAR');
@@ -267,7 +296,7 @@ async function verificarCompuertaPreliminar(proyectoId, usuario) {
     for (const t of enEspera) {
         if (t.tipo === 'ESPERA') { t.estado = 'ESPERA'; await t.save(); continue; }
         t.activadaEn = fechas[t.id];
-        t.estado     = 'EN_PROCESO';
+        t.estado     = await estadoSegunDependenciaDura(t);
         await t.save();
     }
     await log(proyectoId, 'Compuerta preliminar → ejecución abierta: todas las preliminares completadas', usuario);
@@ -325,7 +354,7 @@ router.post('/tareas', proteger, async (req, res) => {
     try {
         if (req.session.user.rol !== 'admin')
             return res.status(403).json({ error: 'Solo el jefe puede agregar tareas' });
-        const { proyectoId, nombre, tipo, diasHabiles, kit, fase } = req.body;
+        const { proyectoId, nombre, tipo, diasHabiles, kit, fase, predecesoraId, desfasajeDias, dependeDuroId } = req.body;
         const faseFinal = fase === 'PRELIMINAR' ? 'PRELIMINAR' : 'EJECUCION';
         const buf = calcBuf(diasHabiles || 1, faseFinal);
         const maxOrden = await Tarea.max('orden', { where: { proyectoId } }) || 0;
@@ -334,7 +363,10 @@ router.post('/tareas', proteger, async (req, res) => {
             tipo: faseFinal === 'PRELIMINAR' ? 'NORMAL' : (tipo || 'NORMAL'),
             estado: tipo === 'ESPERA' ? 'ESPERA' : 'PENDIENTE',
             diasHabiles: diasHabiles || 1, bufferDias: buf,
-            orden: maxOrden + 1
+            orden: maxOrden + 1,
+            predecesoraId: predecesoraId || null,
+            desfasajeDias: parseInt(desfasajeDias) || 0,
+            dependeDuroId: dependeDuroId || null,
         });
         if (kit && kit.length) {
             for (const item of kit) {
@@ -342,6 +374,17 @@ router.post('/tareas', proteger, async (req, res) => {
             }
         }
         await recalcularTotales(proyectoId);
+
+        // Si el proyecto ya está ACTIVO (se agrega una tarea durante la marcha,
+        // no solo mientras es BORRADOR), activarla ya mismo respetando la
+        // compuerta dura si tiene una asignada.
+        const proyecto = await Proyecto.findByPk(proyectoId);
+        if (proyecto && proyecto.estado === 'ACTIVO' && t.tipo !== 'ESPERA') {
+            t.activadaEn = new Date();
+            t.estado     = await estadoSegunDependenciaDura(t);
+            await t.save();
+        }
+
         await log(proyectoId, `Tarea agregada: ${nombre}`, req.session.user.username);
         res.json(await Tarea.findByPk(t.id, { include: [{ model: KitItem, as: 'KitItems' }] }));
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -357,13 +400,14 @@ router.put('/tareas/:id', proteger, async (req, res) => {
 
         if (esJefe) {
             // El jefe puede cambiar todo
-            const { nombre, tipo, diasHabiles, estado, notas, predecesoraId, desfasajeDias } = req.body;
+            const { nombre, tipo, diasHabiles, estado, notas, predecesoraId, desfasajeDias, dependeDuroId } = req.body;
             if (nombre)      t.nombre      = nombre;
             if (tipo && t.fase !== 'PRELIMINAR') t.tipo = tipo;
             if (diasHabiles) { t.diasHabiles = diasHabiles; t.bufferDias = calcBuf(diasHabiles, t.fase); }
             if (estado)      t.estado      = estado;
             if (predecesoraId !== undefined) t.predecesoraId = predecesoraId || null;
             if (desfasajeDias !== undefined) t.desfasajeDias = parseInt(desfasajeDias) || 0;
+            if (dependeDuroId !== undefined) t.dependeDuroId = dependeDuroId || null;
 
             // Si la tarea ya estaba activada y se cambió la relación de dependencia,
             // recalcular su fecha de inicio según la nueva predecesora/desfasaje.
@@ -374,6 +418,14 @@ router.put('/tareas/:id', proteger, async (req, res) => {
                         t.activadaEn = sumarDiasHabiles(new Date(pred.activadaEn), t.desfasajeDias || 0);
                     }
                 }
+            }
+
+            // Si se acaba de asignar una dependencia dura a una tarea que ya estaba
+            // EN_PROCESO, y esa dependencia todavía no está completa, hay que
+            // bloquearla retroactivamente — la compuerta aplica desde que se define.
+            if (dependeDuroId !== undefined && dependeDuroId && t.estado === 'EN_PROCESO') {
+                const dep = await Tarea.findByPk(dependeDuroId);
+                if (dep && dep.estado !== 'COMPLETADA') t.estado = 'ESPERANDO_DEPENDENCIA';
             }
         }
 
@@ -413,6 +465,12 @@ router.put('/tareas/:id', proteger, async (req, res) => {
         // completadas — si es así, la compuerta se abre y libera ejecución.
         if (req.body.marcarHecha === true && t.fase === 'PRELIMINAR') {
             await verificarCompuertaPreliminar(t.proyectoId, req.session.user.username);
+        }
+
+        // Si esta tarea (cualquier fase) quedó COMPLETADA, revisar si destraba
+        // a otras tareas que la tenían como dependencia dura (compuerta real).
+        if (t.estado === 'COMPLETADA') {
+            await liberarDependenciasDuras(t.proyectoId, req.session.user.username);
         }
 
         const accionTxt = req.body.marcarHecha !== undefined
@@ -845,7 +903,8 @@ function enriquecerProyecto(p) {
     // Calcular fever chart SOLO para tareas de EJECUCION — preliminares no usa TOC
     tareas.forEach(t => {
         if (t.fase === 'PRELIMINAR' || !t.activadaEn || t.estado === 'ESPERA' ||
-            t.estado === 'PENDIENTE' || t.estado === 'ESPERANDO_PRELIMINAR') {
+            t.estado === 'PENDIENTE' || t.estado === 'ESPERANDO_PRELIMINAR' ||
+            t.estado === 'ESPERANDO_DEPENDENCIA') {
             t.feverChart = null; return;
         }
         const horizonte  = t.diasHabiles + t.bufferDias;
