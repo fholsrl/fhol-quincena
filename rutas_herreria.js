@@ -395,6 +395,65 @@ router.post('/tareas', proteger, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PUT /herreria/proyectos/:id/sincronizar-tareas
+// Reemplaza TODAS las tareas de un proyecto de una sola vez — pensado para el
+// flujo de "Editar" un proyecto en BORRADOR, donde se vuelve al mismo formulario
+// de carga completo y se guarda todo de nuevo. Solo permitido en BORRADOR: una
+// vez activado, las tareas tienen avance/fechas reales que no se pueden pisar así.
+router.put('/proyectos/:id/sincronizar-tareas', proteger, async (req, res) => {
+    try {
+        if (req.session.user.rol !== 'admin')
+            return res.status(403).json({ error: 'Solo el jefe puede editar el proyecto' });
+        const proyectoId = req.params.id;
+        const proyecto = await Proyecto.findByPk(proyectoId);
+        if (!proyecto) return res.status(404).json({ error: 'No encontrado' });
+        if (proyecto.estado !== 'BORRADOR')
+            return res.status(400).json({ error: 'Solo se pueden reemplazar las tareas de un proyecto en BORRADOR' });
+
+        const { nombre, cliente, responsable, notas, tareas } = req.body;
+        if (nombre)      proyecto.nombre      = nombre;
+        proyecto.cliente     = cliente     ?? proyecto.cliente;
+        proyecto.responsable = responsable ?? proyecto.responsable;
+        proyecto.notas       = notas       ?? proyecto.notas;
+        await proyecto.save();
+
+        // Borrar tareas existentes (KitItems se borran en cascada por la FK)
+        await Tarea.destroy({ where: { proyectoId } });
+
+        // Volver a crear todas según lo que llegó del formulario
+        if (tareas && tareas.length) {
+            for (let i = 0; i < tareas.length; i++) {
+                const t = tareas[i];
+                const fase = t.fase === 'PRELIMINAR' ? 'PRELIMINAR' : 'EJECUCION';
+                const buf  = calcBuf(t.diasHabiles || 1, fase);
+                const tarea = await Tarea.create({
+                    proyectoId, nombre: t.nombre, fase,
+                    tipo: fase === 'PRELIMINAR' ? 'NORMAL' : (t.tipo || 'NORMAL'),
+                    estado: t.tipo === 'ESPERA' ? 'ESPERA' : 'PENDIENTE',
+                    diasHabiles: t.diasHabiles || 1, bufferDias: buf,
+                    orden: i,
+                    diasManual: !!t.diasManual,
+                });
+                if (t.kit && t.kit.length) {
+                    for (const item of t.kit) {
+                        await KitItem.create({
+                            tareaId: tarea.id,
+                            descripcion: item.descripcion,
+                            diasHabiles: item.diasHabiles || 1,
+                            esRestriccion: !!item.esRestriccion,
+                            esSugerida: item.esSugerida || false,
+                        });
+                    }
+                }
+            }
+        }
+
+        await recalcularTotales(proyectoId);
+        await log(proyectoId, 'Proyecto editado — tareas actualizadas', req.session.user.username);
+        res.json({ ok: true, proyectoId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // PUT /herreria/tareas/:id — editar tarea (jefe) o actualizar avance (supervisor)
 router.put('/tareas/:id', proteger, async (req, res) => {
     try {

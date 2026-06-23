@@ -143,7 +143,7 @@
 
 <!-- PANEL: NUEVO PROYECTO -->
 <div id="panel-nuevo" class="hidden bg-white rounded-xl shadow border border-slate-200 p-5 space-y-5">
-    <h2 class="font-black text-slate-800 text-lg">＋ Nuevo proyecto de herrería</h2>
+    <h2 class="font-black text-slate-800 text-lg" id="np-titulo">＋ Nuevo proyecto de herrería</h2>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -191,9 +191,10 @@
     </div>
 
     <div class="flex gap-3">
-        <button onclick="guardarProyecto('ACTIVO')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl hover:bg-green-700 transition">▶ Guardar y activar</button>
-        <button onclick="guardarProyecto('BORRADOR')" class="flex-1 bg-slate-200 text-slate-700 font-black py-3 rounded-xl hover:bg-slate-300 transition">💾 Guardar borrador</button>
+        <button onclick="guardarProyecto('ACTIVO')" id="np-btn-activar" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl hover:bg-green-700 transition">▶ Guardar y activar</button>
+        <button onclick="guardarProyecto('BORRADOR')" id="np-btn-borrador" class="flex-1 bg-slate-200 text-slate-700 font-black py-3 rounded-xl hover:bg-slate-300 transition">💾 Guardar borrador</button>
     </div>
+    <button onclick="cancelarEdicionProyecto()" id="np-btn-cancelar" class="hidden w-full text-slate-400 hover:text-slate-600 text-xs font-bold py-2">Cancelar edición y volver al tablero</button>
 </div>
 
 <!-- PANEL: DETALLE PROYECTO (se abre inline) -->
@@ -438,6 +439,7 @@ let proyectoActual = null;
 let npTareas = [];
 let tareasKitSugeridas = [];
 let esAdmin = false;
+let editandoProyectoId = null; // null = creando nuevo; con valor = editando ese borrador
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 window.onload = async () => {
@@ -470,6 +472,76 @@ function tab(nombre) {
     const t = document.getElementById(`tab-${nombre}`);
     if (t) t.classList.add('active-tab');
     if (nombre === 'calendario') cargarCalendario();
+    // Si se entra a "nuevo" desde el menú (no desde el botón Editar de un
+    // borrador), siempre arranca en modo creación, no edición.
+    if (nombre === 'nuevo' && editandoProyectoId === null) resetFormularioProyecto();
+}
+
+// Limpia el formulario y lo deja listo para crear un proyecto nuevo desde cero.
+function resetFormularioProyecto() {
+    document.getElementById('np-titulo').textContent = '＋ Nuevo proyecto de herrería';
+    document.getElementById('np-btn-activar').textContent  = '▶ Guardar y activar';
+    document.getElementById('np-btn-borrador').textContent = '💾 Guardar borrador';
+    document.getElementById('np-btn-cancelar').classList.add('hidden');
+    document.getElementById('np-nombre').value = '';
+    document.getElementById('np-cliente').value = '';
+    document.getElementById('np-responsable').value = '';
+    document.getElementById('np-notas').value = '';
+    document.getElementById('np-tareas').innerHTML = '';
+    npTareas = []; npIdx = 0;
+    agregarTareaForm();
+    recalcNpTotal();
+}
+
+function cancelarEdicionProyecto() {
+    const idVolver = editandoProyectoId;
+    editandoProyectoId = null;
+    resetFormularioProyecto();
+    if (idVolver) abrirDetalle(idVolver);
+    else tab('tablero');
+}
+
+// Abre el formulario completo PRECARGADO con los datos de un proyecto en
+// BORRADOR — mismo entorno que al crearlo, para poder seguir editándolo sin
+// duplicar lógica en otro lado.
+function abrirEdicionBorrador(p) {
+    editandoProyectoId = p.id;
+    document.getElementById('np-titulo').textContent = `✏️ Editando borrador — ${p.nombre}`;
+    document.getElementById('np-btn-activar').textContent  = '▶ Guardar y activar';
+    document.getElementById('np-btn-borrador').textContent = '💾 Guardar cambios';
+    document.getElementById('np-btn-cancelar').classList.remove('hidden');
+
+    document.getElementById('np-nombre').value      = p.nombre || '';
+    document.getElementById('np-cliente').value     = p.cliente || '';
+    document.getElementById('np-responsable').value = p.responsable || '';
+    document.getElementById('np-notas').value       = p.notas || '';
+
+    document.getElementById('np-tareas').innerHTML = '';
+    npTareas = []; npIdx = 0;
+
+    const todasLasTareas = [...(p.tareasPreliminares||[]), ...(p.tareasEjecucion||[])]
+        .sort((a,b) => a.orden - b.orden);
+
+    if (todasLasTareas.length) {
+        todasLasTareas.forEach(t => {
+            agregarTareaForm({
+                nombre: t.nombre,
+                fase: t.fase,
+                tipo: t.tipo,
+                diasHabiles: t.diasHabiles,
+                kit: (t.KitItems || []).map(k => ({
+                    descripcion: k.descripcion,
+                    diasHabiles: k.diasHabiles,
+                    esRestriccion: k.esRestriccion,
+                    esSugerida: k.esSugerida,
+                })),
+            });
+        });
+    } else {
+        agregarTareaForm();
+    }
+    recalcNpTotal();
+    tab('nuevo');
 }
 
 // ─── Carga de datos ───────────────────────────────────────────────────────────
@@ -651,7 +723,15 @@ function renderDetalle() {
     const acc = document.getElementById('det-acciones');
     let html = '';
     if (esAdmin) {
-        html += `<button onclick="abrirModalProyecto()" class="bg-violet-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-violet-700 transition">✏️ Editar proyecto</button>`;
+        // En BORRADOR, "Editar" vuelve al mismo formulario completo de carga
+        // (mismo entorno que al crear el proyecto). En otros estados, solo se
+        // editan datos generales con el modal chico — la estructura de tareas
+        // ya tiene avance/fechas reales y no se puede reemplazar sin perderlos.
+        if (p.estado === 'BORRADOR') {
+            html += `<button onclick="abrirEdicionBorrador(proyectoActual)" class="bg-violet-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-violet-700 transition">✏️ Editar</button>`;
+        } else {
+            html += `<button onclick="abrirModalProyecto()" class="bg-violet-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-violet-700 transition">✏️ Editar proyecto</button>`;
+        }
         if (p.estado === 'BORRADOR' || p.estado === 'PAUSADO')
             html += `<button onclick="accionProyecto('activar')" class="bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-green-700 transition">▶ Activar</button>`;
         if (p.estado === 'ACTIVO')
@@ -1120,41 +1200,54 @@ let npIdx = 0;
 function agregarTareaForm(datos = {}) {
     npIdx++;
     const id = `tarea-${npIdx}`;
+    const fase = datos.fase || 'EJECUCION';
+    const tipo = datos.tipo || 'NORMAL';
+    const dias = datos.diasHabiles || 1;
+    const kit  = (datos.kit || []).map(k => ({ ...k })); // copia, no referencia directa
     if (!npTareas.find(t => t.id === id)) {
-        npTareas.push({ id, nombre:'', fase:'EJECUCION', tipo:'NORMAL', diasHabiles:1, kit:[] });
+        npTareas.push({ id, nombre: datos.nombre || '', fase, tipo, diasHabiles: dias, kit });
     }
     const cont = document.getElementById('np-tareas');
     const div  = document.createElement('div');
     div.id = id;
-    div.className = 'border-2 border-slate-200 rounded-xl p-4 space-y-3';
+    const esPrelim = fase === 'PRELIMINAR';
+    div.className = `border-2 rounded-xl p-4 space-y-3 ${esPrelim ? 'border-blue-200' : tipo==='RESTRICCION' ? 'border-amber-300' : tipo==='ESPERA' ? 'border-violet-300' : 'border-slate-200'}`;
+    const buf = esPrelim ? 0 : Math.ceil(dias * 0.30);
+    const bufTexto = esPrelim ? 'Sin buffer (preliminar)' : `Buffer: ${buf}d`;
+    const horTexto  = esPrelim ? `Solo ${dias}d estimados` : `Horizonte: ${dias+buf}d`;
+
     div.innerHTML = `
         <div class="flex items-center gap-2">
             <span class="text-xs font-bold text-slate-400 w-5">${npIdx}</span>
-            <input type="text" placeholder="Nombre de la tarea" class="flex-1 border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:border-violet-400 uppercase"
+            <input type="text" value="${datos.nombre || ''}" placeholder="Nombre de la tarea" class="flex-1 border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:border-violet-400 uppercase"
                 oninput="npSetTarea('${id}','nombre',this.value.toUpperCase())">
             <button onclick="eliminarTareaForm('${id}')" class="text-slate-300 hover:text-red-500 text-lg leading-none">✕</button>
         </div>
         <div class="flex flex-wrap gap-2 items-center">
             <span class="text-xs text-slate-400 font-bold">Fase:</span>
-            <button onclick="npSelFase('${id}','PRELIMINAR',this)" class="tipo-opt">📝 Preliminar</button>
-            <button onclick="npSelFase('${id}','EJECUCION',this)" class="tipo-opt sel-NORMAL">🔧 Ejecución</button>
-            <span class="text-xs text-slate-400 italic ml-1" id="npfaseinfo-${id}">Ejecución usa buffer TOC del 30%</span>
+            <button onclick="npSelFase('${id}','PRELIMINAR',this)" class="tipo-opt ${esPrelim?'sel-NORMAL':''}">📝 Preliminar</button>
+            <button onclick="npSelFase('${id}','EJECUCION',this)" class="tipo-opt ${esPrelim?'':'sel-NORMAL'}">🔧 Ejecución</button>
+            <span class="text-xs text-slate-400 italic ml-1" id="npfaseinfo-${id}">${esPrelim ? 'Preliminar: sin buffer, solo registra fecha de cierre' : 'Ejecución usa buffer TOC del 30%'}</span>
         </div>
-        <div class="flex flex-wrap gap-2 items-center" id="nptipowrap-${id}">
+        <div class="flex flex-wrap gap-2 items-center" id="nptipowrap-${id}" style="${esPrelim?'display:none;':''}">
             <span class="text-xs text-slate-400 font-bold">Tipo:</span>
-            <button onclick="npSelTipo('${id}','NORMAL',this)" class="tipo-opt sel-NORMAL">Normal</button>
-            <button onclick="npSelTipo('${id}','RESTRICCION',this)" class="tipo-opt">Restricción</button>
-            <button onclick="npSelTipo('${id}','ESPERA',this)" class="tipo-opt">En espera</button>
+            <button onclick="npSelTipo('${id}','NORMAL',this)" class="tipo-opt ${tipo==='NORMAL'?'sel-NORMAL':''}">Normal</button>
+            <button onclick="npSelTipo('${id}','RESTRICCION',this)" class="tipo-opt ${tipo==='RESTRICCION'?'sel-RESTRICCION':''}">Restricción</button>
+            <button onclick="npSelTipo('${id}','ESPERA',this)" class="tipo-opt ${tipo==='ESPERA'?'sel-ESPERA':''}">En espera</button>
         </div>
         <div class="flex items-center gap-3">
             <span class="text-xs text-slate-400 font-bold">Días hábiles:</span>
-            <input type="number" min="1" value="1" class="w-20 border border-slate-200 rounded-lg p-2 text-sm text-center focus:outline-none focus:border-violet-400"
+            <input type="number" min="1" value="${dias}" class="w-20 border border-slate-200 rounded-lg p-2 text-sm text-center focus:outline-none focus:border-violet-400"
                 oninput="npSetDias('${id}',this.value)">
-            <span class="text-xs text-violet-600 font-bold" id="npbuf-${id}">Buffer: 1d</span>
-            <span class="text-xs text-slate-400" id="nphor-${id}">Horizonte: 1d</span>
+            <span class="text-xs text-violet-600 font-bold" id="npbuf-${id}">${bufTexto}</span>
+            <span class="text-xs text-slate-400" id="nphor-${id}">${horTexto}</span>
         </div>
-        <div class="space-y-1" id="npkit-${id}"></div>
-        <div class="flex gap-2 flex-wrap" id="npkitbtn-${id}">
+        <div class="space-y-1" id="npkit-${id}">
+            ${kit.map(k => `<div class="text-xs text-slate-600 bg-slate-50 px-2 py-1 rounded-lg flex items-center gap-2">
+                <span class="${k.esSugerida?'text-violet-500':'text-green-500'}">${k.esSugerida?'⭐':'▣'}</span> ${k.descripcion}${k.diasHabiles?` <span class="text-slate-400">(${k.diasHabiles}d)</span>`:''}
+            </div>`).join('')}
+        </div>
+        <div class="flex gap-2 flex-wrap" id="npkitbtn-${id}" style="${esPrelim?'display:none;':''}">
             <button onclick="npAgregarKit('${id}')" class="text-xs text-violet-500 hover:text-violet-700 font-bold">＋ Ítem al kit</button>
             ${tareasKitSugeridas.length ? `<span class="text-xs text-slate-400">Sugeridos:</span>
             ${tareasKitSugeridas.slice(0,3).map(s => `<button onclick="npKitSugerido('${id}','${s.descripcion}')" class="text-xs bg-violet-50 text-violet-600 border border-violet-200 px-2 py-0.5 rounded-lg hover:bg-violet-100">+ ${s.descripcion}</button>`).join('')}` : ''}
@@ -1295,28 +1388,34 @@ async function guardarProyecto(estado) {
         tareas:      tareasDOM
     };
 
-    const res = await fetch('/herreria/proyectos', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(body)
-    });
-    const nuevo = await res.json();
-
-    if (estado === 'ACTIVO') {
-        await fetch(`/herreria/proyectos/${nuevo.id}/activar`, { method:'POST' });
+    let proyectoId;
+    if (editandoProyectoId) {
+        // Modo edición: reemplaza todas las tareas del borrador existente
+        await fetch(`/herreria/proyectos/${editandoProyectoId}/sincronizar-tareas`, {
+            method:'PUT', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(body)
+        });
+        proyectoId = editandoProyectoId;
+    } else {
+        // Modo creación: proyecto nuevo
+        const res = await fetch('/herreria/proyectos', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(body)
+        });
+        const nuevo = await res.json();
+        proyectoId = nuevo.id;
     }
 
-    // Reset form
-    document.getElementById('np-nombre').value = '';
-    document.getElementById('np-cliente').value = '';
-    document.getElementById('np-responsable').value = '';
-    document.getElementById('np-notas').value = '';
-    document.getElementById('np-tareas').innerHTML = '';
-    npTareas = []; npIdx = 0;
-    agregarTareaForm();
+    if (estado === 'ACTIVO') {
+        await fetch(`/herreria/proyectos/${proyectoId}/activar`, { method:'POST' });
+    }
+
+    editandoProyectoId = null;
+    resetFormularioProyecto();
 
     await cargarProyectos();
     await cargarRestriccion();
-    await abrirDetalle(nuevo.id);
+    await abrirDetalle(proyectoId);
 }
 
 // ─── Modal editar tarea ───────────────────────────────────────────────────────
