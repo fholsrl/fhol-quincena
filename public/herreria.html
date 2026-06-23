@@ -60,7 +60,7 @@
 </div>
 
 <!-- STATS -->
-<div class="grid grid-cols-2 md:grid-cols-5 gap-3" id="stats-bar">
+<div class="grid grid-cols-3 gap-3" id="stats-bar">
     <div class="bg-white rounded-xl p-3 shadow border border-slate-200 text-center">
         <div class="text-2xl font-black text-slate-800" id="st-total">—</div>
         <div class="text-xs text-slate-500 font-bold uppercase mt-1">Proyectos activos</div>
@@ -72,14 +72,6 @@
     <div class="bg-white rounded-xl p-3 shadow border border-slate-200 text-center">
         <div class="text-2xl font-black text-yellow-600" id="st-alerta">—</div>
         <div class="text-xs text-slate-500 font-bold uppercase mt-1">En alerta</div>
-    </div>
-    <div class="bg-white rounded-xl p-3 shadow border border-slate-200 text-center">
-        <div class="text-2xl font-black text-red-600" id="st-critico">—</div>
-        <div class="text-xs text-slate-500 font-bold uppercase mt-1">Buffer crítico</div>
-    </div>
-    <div class="bg-white rounded-xl p-3 shadow border border-slate-200 text-center">
-        <div class="text-2xl font-black text-slate-800" id="st-terminados">—</div>
-        <div class="text-xs text-slate-500 font-bold uppercase mt-1">Terminados</div>
     </div>
 </div>
 
@@ -98,6 +90,23 @@
 
 <!-- PANEL: CALENDARIO -->
 <div id="panel-calendario" class="hidden bg-white rounded-xl shadow border border-slate-200 p-4 space-y-4">
+
+    <!-- LÍNEA GENERAL POR PROYECTO con hitos -->
+    <div class="border-b border-slate-100 pb-4">
+        <div class="flex justify-between items-center mb-3">
+            <span class="font-black text-slate-700 text-sm">📍 Línea de tiempo por proyecto</span>
+            <select id="cal-filtro-proyecto" onchange="renderLineaGeneral()" class="text-xs font-bold border border-slate-300 rounded-lg px-2 py-1">
+                <option value="">Todos los proyectos</option>
+            </select>
+        </div>
+        <div id="cal-linea-general" class="space-y-3"></div>
+        <div class="flex items-center gap-4 mt-2 text-xs text-slate-400">
+            <span class="flex items-center gap-1">⭐ Hito completado</span>
+            <span class="flex items-center gap-1">📍 Hoy</span>
+        </div>
+    </div>
+
+    <!-- CALENDARIO TRADICIONAL (mes/semana, por tarea) -->
     <div class="flex justify-between items-center">
         <div class="flex gap-1">
             <button onclick="calVista('mes')" id="cal-tab-mes" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700">Mes</button>
@@ -503,11 +512,7 @@ function renderEstadisticas() {
     document.getElementById('st-borrador').textContent =
         proyectos.filter(p => p.estado === 'BORRADOR').length;
     document.getElementById('st-alerta').textContent =
-        proyectos.filter(p => p.bufferEstado === 'ALERTA').length;
-    document.getElementById('st-critico').textContent =
-        proyectos.filter(p => p.bufferEstado === 'CRITICO').length;
-    document.getElementById('st-terminados').textContent =
-        proyectos.filter(p => p.estado === 'TERMINADO').length;
+        proyectos.filter(p => p.bufferEstado === 'ALERTA' || p.bufferEstado === 'CRITICO').length;
 }
 
 // ─── Tablero ──────────────────────────────────────────────────────────────────
@@ -1521,10 +1526,83 @@ const COLORES_PROYECTO = [
     { bg:'#EAF3DE', txt:'#3B6D11' }, { bg:'#F1EFE8', txt:'#5F5E5A' },
 ];
 
+let calProyectosLinea = [];
+
 async function cargarCalendario() {
     const res = await fetch('/herreria/calendario');
     calEventos = await res.json();
     renderCalendario();
+
+    const resLinea = await fetch('/herreria/calendario/proyectos');
+    calProyectosLinea = await resLinea.json();
+    poblarFiltroProyectoLinea();
+    renderLineaGeneral();
+}
+
+function poblarFiltroProyectoLinea() {
+    const sel = document.getElementById('cal-filtro-proyecto');
+    const actual = sel.value;
+    sel.innerHTML = '<option value="">Todos los proyectos</option>' +
+        calProyectosLinea.map(p => `<option value="${p.proyectoId}">${p.proyectoNombre}</option>`).join('');
+    sel.value = actual;
+}
+
+function renderLineaGeneral() {
+    const cont = document.getElementById('cal-linea-general');
+    const filtroId = document.getElementById('cal-filtro-proyecto').value;
+    const lista = filtroId ? calProyectosLinea.filter(p => String(p.proyectoId) === filtroId) : calProyectosLinea;
+
+    if (!lista.length) {
+        cont.innerHTML = '<div class="text-xs text-slate-400 italic py-4 text-center">Sin proyectos con tareas activadas todavía.</div>';
+        return;
+    }
+
+    // Horizonte común: desde el inicio más temprano de todos los proyectos
+    // visibles hasta hoy, así todas las líneas comparten la misma escala.
+    const hoy = new Date();
+    const inicios = lista.map(p => new Date(p.inicio));
+    const fines    = lista.map(p => new Date(p.fin));
+    const minFecha = new Date(Math.min(...inicios, hoy));
+    const maxFecha = new Date(Math.max(...fines, hoy));
+    const totalDias = Math.max(1, Math.round((maxFecha - minFecha) / 86400000));
+
+    const pct = (fecha) => {
+        const d = (new Date(fecha) - minFecha) / 86400000;
+        return Math.min(100, Math.max(0, (d / totalDias) * 100));
+    };
+    const hoyPct = pct(hoy);
+
+    cont.innerHTML = lista.map(p => {
+        const color = COLORES_PROYECTO[p.colorIdx % COLORES_PROYECTO.length];
+        const inicioPct = pct(p.inicio);
+        const finPct    = pct(p.fin);
+        const anchoPct  = Math.max(1, finPct - inicioPct);
+        const estadoTxt = p.estado === 'TERMINADO' ? 'Terminado' : p.estado === 'PAUSADO' ? 'Pausado' : 'En curso';
+
+        const hitosHtml = p.hitos.map(h => {
+            const hPct = pct(h.fecha);
+            return `<div class="absolute -top-1 text-amber-500 cursor-default" style="left:${hPct}%;transform:translateX(-50%);" title="⭐ ${h.nombre} — completado el ${fmtDiaCorto(h.fecha)}">⭐</div>`;
+        }).join('');
+
+        return `<div class="cursor-pointer" onclick="abrirDetalle(${p.proyectoId})">
+            <div class="flex justify-between items-center text-xs mb-1">
+                <span class="font-bold text-slate-700">${p.proyectoNombre}</span>
+                <span class="text-slate-400">${fmtDiaCorto(p.inicio)} → ${p.estado==='TERMINADO'?fmtDiaCorto(p.fin):'hoy'} · ${estadoTxt}</span>
+            </div>
+            <div class="relative h-3 bg-slate-100 rounded-full">
+                <div class="absolute h-3 rounded-full" style="left:${inicioPct}%;width:${anchoPct}%;background:${color.txt};opacity:.85;"></div>
+                ${hitosHtml}
+            </div>
+        </div>`;
+    }).join('') + `
+        <div class="relative h-0">
+            <div class="absolute text-violet-500 text-xs" style="left:${hoyPct}%;transform:translateX(-50%);top:-26px;" title="Hoy">📍</div>
+        </div>`;
+}
+
+function fmtDiaCorto(fechaStr) {
+    const [y,m,d] = fechaStr.split('-');
+    return `${d}/${m}`;
 }
 
 function calVista(v) {
@@ -1558,6 +1636,18 @@ function eventosEnDia(fecha) {
     return calEventos.filter(e => ymd >= e.inicio && ymd <= e.fin);
 }
 
+// Devuelve los hitos (de cualquier proyecto) que caen exactamente en un día dado
+function hitosEnDia(fecha) {
+    const ymd = fmtYMD(fecha);
+    const hitos = [];
+    calProyectosLinea.forEach(p => {
+        (p.hitos || []).forEach(h => {
+            if (h.fecha === ymd) hitos.push({ ...h, proyectoNombre: p.proyectoNombre });
+        });
+    });
+    return hitos;
+}
+
 function renderCalendario() {
     const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -1578,8 +1668,13 @@ function renderCalendario() {
             const esDelMes = cursor.getMonth() === calFechaRef.getMonth();
             const esHoy = fmtYMD(cursor) === hoy;
             const evs = eventosEnDia(cursor);
-            html += `<div class="rounded-lg p-1 min-h-[64px] ${esDelMes?'bg-slate-50':'bg-slate-50/40 opacity-40'} ${esHoy?'ring-2 ring-violet-400':''}">
-                <div class="font-bold text-slate-600">${cursor.getDate()}</div>
+            const hitosDia = hitosEnDia(cursor);
+            const hitosTitle = hitosDia.map(h => `⭐ ${h.nombre} (${h.proyectoNombre})`).join(' · ');
+            html += `<div class="rounded-lg p-1 min-h-[64px] relative ${esDelMes?'bg-slate-50':'bg-slate-50/40 opacity-40'} ${esHoy?'ring-2 ring-violet-400':''}">
+                <div class="flex justify-between items-start">
+                    <div class="font-bold text-slate-600">${cursor.getDate()}</div>
+                    ${hitosDia.length ? `<span class="text-amber-500 text-xs" title="${hitosTitle}">⭐</span>` : ''}
+                </div>
                 ${evs.slice(0,3).map(e => {
                     const c = colorProyecto(e.proyectoId);
                     return `<div class="text-[10px] rounded px-1 mb-0.5 truncate" style="background:${c.bg};color:${c.txt}" title="${e.proyectoNombre} — ${e.tareaNombre}">${e.proyectoNombre}</div>`;
@@ -1604,15 +1699,20 @@ function renderCalendario() {
         let cursor = new Date(lunes);
         for (let i = 0; i < 6; i++) {
             const evs = eventosEnDia(cursor);
+            const hitosDia = hitosEnDia(cursor);
             html += `<div class="border border-slate-200 rounded-xl p-2 min-h-[140px]">
-                <div class="text-xs font-bold text-slate-600 border-b border-slate-100 pb-1 mb-2">${nombresDias[i]} ${cursor.getDate()}</div>
+                <div class="flex justify-between items-center text-xs font-bold text-slate-600 border-b border-slate-100 pb-1 mb-2">
+                    <span>${nombresDias[i]} ${cursor.getDate()}</span>
+                    ${hitosDia.length ? `<span class="text-amber-500" title="${hitosDia.map(h=>h.nombre+' ('+h.proyectoNombre+')').join(' · ')}">⭐</span>` : ''}
+                </div>
+                ${hitosDia.map(h => `<div class="rounded-lg p-1.5 mb-1.5 text-xs bg-amber-50 text-amber-700 border border-amber-200">⭐ <strong>${h.nombre}</strong><div class="text-[10px] opacity-80">${h.proyectoNombre} — hito completado</div></div>`).join('')}
                 ${evs.length ? evs.map(e => {
                     const c = colorProyecto(e.proyectoId);
                     return `<div class="rounded-lg p-1.5 mb-1.5 text-xs" style="background:${c.bg};color:${c.txt}">
                         <div class="font-bold truncate">${e.tareaNombre}</div>
                         <div class="text-[10px] opacity-80 truncate">${e.proyectoNombre} · ${e.avancePct}%</div>
                     </div>`;
-                }).join('') : `<div class="text-[11px] text-slate-300 italic">Sin tareas</div>`}
+                }).join('') : (!hitosDia.length ? `<div class="text-[11px] text-slate-300 italic">Sin tareas</div>` : '')}
             </div>`;
             cursor.setDate(cursor.getDate() + 1);
         }

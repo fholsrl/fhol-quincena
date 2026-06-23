@@ -998,6 +998,59 @@ router.get('/calendario', proteger, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /herreria/calendario/proyectos
+// Vista general por PROYECTO (no por tarea): una línea por proyecto desde su
+// fecha real de inicio (la tarea de ejecución más temprana activada) hasta hoy
+// o hasta que terminó, más los HITOS — tareas tipo RESTRICCION o marcadas como
+// hito que ya se completaron, con la fecha exacta en que se cerraron.
+router.get('/calendario/proyectos', proteger, async (req, res) => {
+    try {
+        const proyectos = await Proyecto.findAll({
+            where: { estado: { [Op.in]: ['ACTIVO', 'PAUSADO', 'TERMINADO'] } },
+            include: [{ model: Tarea, as: 'Tareas', where: { fase: { [Op.ne]: 'PRELIMINAR' } }, required: false }]
+        });
+
+        const hoy = new Date().toISOString().split('T')[0];
+        const resultado = [];
+
+        proyectos.forEach((p, idx) => {
+            const tareasActivadas = (p.Tareas || []).filter(t => t.activadaEn);
+            if (!tareasActivadas.length) return; // sin tareas activadas, no hay línea que dibujar
+
+            const fechaInicio = tareasActivadas
+                .map(t => t.activadaEn)
+                .sort((a, b) => new Date(a) - new Date(b))[0];
+
+            const fechaFin = p.estado === 'TERMINADO' && p.terminadoEn
+                ? new Date(p.terminadoEn).toISOString().split('T')[0]
+                : hoy;
+
+            // Hitos: tareas tipo RESTRICCION o marcadas como hito explícito (tipo
+            // 'HITO' si se usa ese valor) que ya están COMPLETADA, con la fecha
+            // real de finalización (completadaEn).
+            const hitos = tareasActivadas
+                .filter(t => (t.tipo === 'RESTRICCION' || t.tipo === 'HITO') && t.estado === 'COMPLETADA' && t.completadaEn)
+                .map(t => ({
+                    tareaId: t.id,
+                    nombre: t.nombre,
+                    fecha: new Date(t.completadaEn).toISOString().split('T')[0],
+                }));
+
+            resultado.push({
+                proyectoId: p.id,
+                proyectoNombre: p.nombre,
+                estado: p.estado,
+                inicio: new Date(fechaInicio).toISOString().split('T')[0],
+                fin: fechaFin,
+                hitos,
+                colorIdx: idx % 8
+            });
+        });
+
+        res.json(resultado);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /herreria/calendario/excel?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
 // Exporta el calendario del rango pedido como planilla Excel
 router.get('/calendario/excel', proteger, async (req, res) => {
