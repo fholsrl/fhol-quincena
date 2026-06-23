@@ -1029,12 +1029,38 @@ router.get('/calendario', proteger, async (req, res) => {
     try {
         const proyectos = await Proyecto.findAll({
             where: { estado: { [Op.in]: ['ACTIVO', 'PAUSADO', 'TERMINADO'] } },
-            include: [{ model: Tarea, as: 'Tareas', where: { fase: { [Op.ne]: 'PRELIMINAR' } }, required: false }]
+            include: [{ model: Tarea, as: 'Tareas', required: false }]
         });
 
         const eventos = [];
         proyectos.forEach((p, idx) => {
             (p.Tareas || []).forEach(t => {
+                if (t.fase === 'PRELIMINAR') {
+                    // Las preliminares son puntuales: aparecen el día de su
+                    // activación (en curso) o el día en que se cerraron (hecha).
+                    if (t.cerradaEn) {
+                        const f = new Date(t.cerradaEn).toISOString().split('T')[0];
+                        eventos.push({
+                            proyectoId: p.id, proyectoNombre: p.nombre,
+                            tareaId: t.id, tareaNombre: t.nombre,
+                            inicio: f, fin: f,
+                            estado: 'COMPLETADA', avancePct: 100,
+                            esPreliminar: true,
+                            colorIdx: idx % 8
+                        });
+                    } else if (t.activadaEn) {
+                        const f = new Date(t.activadaEn).toISOString().split('T')[0];
+                        eventos.push({
+                            proyectoId: p.id, proyectoNombre: p.nombre,
+                            tareaId: t.id, tareaNombre: t.nombre,
+                            inicio: f, fin: f,
+                            estado: t.estado, avancePct: 0,
+                            esPreliminar: true,
+                            colorIdx: idx % 8
+                        });
+                    }
+                    return;
+                }
                 if (!t.activadaEn) return; // sin fecha de inicio real, no se puede ubicar en calendario
                 const inicio = new Date(t.activadaEn);
                 // Fin = inicio + días de plan (sin contar el buffer, que es margen no trabajo)
@@ -1048,6 +1074,7 @@ router.get('/calendario', proteger, async (req, res) => {
                     fin: fin.toISOString().split('T')[0],
                     estado: t.estado,
                     avancePct: t.avancePct,
+                    esPreliminar: false,
                     colorIdx: idx % 8 // para asignar color consistente por proyecto en el frontend
                 });
             });
@@ -1059,40 +1086,58 @@ router.get('/calendario', proteger, async (req, res) => {
 
 // GET /herreria/calendario/proyectos
 // Vista general por PROYECTO (no por tarea): una línea por proyecto desde su
-// fecha real de inicio (la tarea de ejecución más temprana activada) hasta hoy
-// o hasta que terminó, más los HITOS — tareas tipo RESTRICCION o marcadas como
-// hito que ya se completaron, con la fecha exacta en que se cerraron.
+// fecha real de inicio hasta hoy o hasta que terminó, más los HITOS — tareas
+// tipo RESTRICCION (ejecución) ya completadas, y las PRELIMINARES (cerradas o
+// en curso) como marcas puntuales, para que el avance se vea desde el día 1,
+// no recién cuando arranca la fase de ejecución.
 router.get('/calendario/proyectos', proteger, async (req, res) => {
     try {
         const proyectos = await Proyecto.findAll({
             where: { estado: { [Op.in]: ['ACTIVO', 'PAUSADO', 'TERMINADO'] } },
-            include: [{ model: Tarea, as: 'Tareas', where: { fase: { [Op.ne]: 'PRELIMINAR' } }, required: false }]
+            include: [{ model: Tarea, as: 'Tareas', required: false }]
         });
 
         const hoy = new Date().toISOString().split('T')[0];
         const resultado = [];
 
         proyectos.forEach((p, idx) => {
-            const tareasActivadas = (p.Tareas || []).filter(t => t.activadaEn);
-            if (!tareasActivadas.length) return; // sin tareas activadas, no hay línea que dibujar
-
-            const fechaInicio = tareasActivadas
-                .map(t => t.activadaEn)
-                .sort((a, b) => new Date(a) - new Date(b))[0];
+            const todasActivadas = (p.Tareas || []).filter(t => t.activadaEn);
+            // El inicio del proyecto es la primera tarea activada de CUALQUIER
+            // fase — normalmente una preliminar, ya que arrancan primero.
+            // Si no hay ninguna tarea activada todavía, se usa activadoEn del
+            // proyecto como respaldo (por si se activó pero aún no corrió nada).
+            let fechaInicio = null;
+            if (todasActivadas.length) {
+                fechaInicio = todasActivadas
+                    .map(t => t.activadaEn)
+                    .sort((a, b) => new Date(a) - new Date(b))[0];
+            } else if (p.activadoEn) {
+                fechaInicio = p.activadoEn;
+            } else {
+                return; // ni tareas activadas ni proyecto activado — nada que dibujar
+            }
 
             const fechaFin = p.estado === 'TERMINADO' && p.terminadoEn
                 ? new Date(p.terminadoEn).toISOString().split('T')[0]
                 : hoy;
 
-            // Hitos: tareas tipo RESTRICCION o marcadas como hito explícito (tipo
-            // 'HITO' si se usa ese valor) que ya están COMPLETADA, con la fecha
-            // real de finalización (completadaEn).
-            const hitos = tareasActivadas
-                .filter(t => (t.tipo === 'RESTRICCION' || t.tipo === 'HITO') && t.estado === 'COMPLETADA' && t.completadaEn)
+            // Hitos de EJECUCIÓN: tareas tipo RESTRICCION ya completadas.
+            const hitosEjecucion = todasActivadas
+                .filter(t => t.fase !== 'PRELIMINAR' && t.tipo === 'RESTRICCION' && t.estado === 'COMPLETADA' && t.completadaEn)
                 .map(t => ({
-                    tareaId: t.id,
-                    nombre: t.nombre,
+                    tareaId: t.id, nombre: t.nombre,
                     fecha: new Date(t.completadaEn).toISOString().split('T')[0],
+                    tipo: 'hito',
+                }));
+
+            // Hitos de PRELIMINAR: cada preliminar cerrada marca su propio punto,
+            // así se ve el avance administrativo día por día, no solo al final.
+            const hitosPreliminar = (p.Tareas || [])
+                .filter(t => t.fase === 'PRELIMINAR' && t.cerradaEn)
+                .map(t => ({
+                    tareaId: t.id, nombre: t.nombre,
+                    fecha: new Date(t.cerradaEn).toISOString().split('T')[0],
+                    tipo: 'preliminar',
                 }));
 
             resultado.push({
@@ -1101,7 +1146,7 @@ router.get('/calendario/proyectos', proteger, async (req, res) => {
                 estado: p.estado,
                 inicio: new Date(fechaInicio).toISOString().split('T')[0],
                 fin: fechaFin,
-                hitos,
+                hitos: [...hitosPreliminar, ...hitosEjecucion],
                 colorIdx: idx % 8
             });
         });

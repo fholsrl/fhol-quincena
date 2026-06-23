@@ -102,6 +102,7 @@
         <div id="cal-linea-general" class="space-y-3"></div>
         <div class="flex items-center gap-4 mt-2 text-xs text-slate-400">
             <span class="flex items-center gap-1">⭐ Hito completado</span>
+            <span class="flex items-center gap-1">📋 Preliminar cerrada</span>
             <span class="flex items-center gap-1">📍 Hoy</span>
         </div>
     </div>
@@ -1680,7 +1681,9 @@ function renderLineaGeneral() {
 
         const hitosHtml = p.hitos.map(h => {
             const hPct = pct(h.fecha);
-            return `<div class="absolute -top-1 text-amber-500 cursor-default" style="left:${hPct}%;transform:translateX(-50%);" title="⭐ ${h.nombre} — completado el ${fmtDiaCorto(h.fecha)}">⭐</div>`;
+            const icono = h.tipo === 'preliminar' ? '📋' : '⭐';
+            const etiqueta = h.tipo === 'preliminar' ? 'Preliminar cerrada' : 'Hito completado';
+            return `<div class="absolute -top-1 ${h.tipo === 'preliminar' ? 'text-blue-500' : 'text-amber-500'} cursor-default" style="left:${hPct}%;transform:translateX(-50%);" title="${icono} ${etiqueta}: ${h.nombre} — ${fmtDiaCorto(h.fecha)}">${icono}</div>`;
         }).join('');
 
         return `<div class="cursor-pointer" onclick="abrirDetalle(${p.proyectoId})">
@@ -1768,15 +1771,17 @@ function renderCalendario() {
             const esHoy = fmtYMD(cursor) === hoy;
             const evs = eventosEnDia(cursor);
             const hitosDia = hitosEnDia(cursor);
-            const hitosTitle = hitosDia.map(h => `⭐ ${h.nombre} (${h.proyectoNombre})`).join(' · ');
+            const hitoIcono = hitosDia.some(h => h.tipo !== 'preliminar') ? '⭐' : '📋';
+            const hitosTitle = hitosDia.map(h => `${h.tipo==='preliminar'?'📋':'⭐'} ${h.nombre} (${h.proyectoNombre})`).join(' · ');
             html += `<div class="rounded-lg p-1 min-h-[64px] relative ${esDelMes?'bg-slate-50':'bg-slate-50/40 opacity-40'} ${esHoy?'ring-2 ring-violet-400':''}">
                 <div class="flex justify-between items-start">
                     <div class="font-bold text-slate-600">${cursor.getDate()}</div>
-                    ${hitosDia.length ? `<span class="text-amber-500 text-xs" title="${hitosTitle}">⭐</span>` : ''}
+                    ${hitosDia.length ? `<span class="text-xs" title="${hitosTitle}">${hitoIcono}</span>` : ''}
                 </div>
                 ${evs.slice(0,3).map(e => {
                     const c = colorProyecto(e.proyectoId);
-                    return `<div class="text-[10px] rounded px-1 mb-0.5 truncate" style="background:${c.bg};color:${c.txt}" title="${e.proyectoNombre} — ${e.tareaNombre}">${e.proyectoNombre}</div>`;
+                    const prefijo = e.esPreliminar ? '📋 ' : '';
+                    return `<div class="text-[10px] rounded px-1 mb-0.5 truncate" style="background:${c.bg};color:${c.txt}" title="${e.proyectoNombre} — ${e.tareaNombre}">${prefijo}${e.proyectoNombre}</div>`;
                 }).join('')}
                 ${evs.length > 3 ? `<div class="text-[10px] text-slate-400">+${evs.length-3} más</div>` : ''}
             </div>`;
@@ -1799,19 +1804,24 @@ function renderCalendario() {
         for (let i = 0; i < 6; i++) {
             const evs = eventosEnDia(cursor);
             const hitosDia = hitosEnDia(cursor);
+            const hitoIcono = hitosDia.some(h => h.tipo !== 'preliminar') ? '⭐' : '📋';
             html += `<div class="border border-slate-200 rounded-xl p-2 min-h-[140px]">
                 <div class="flex justify-between items-center text-xs font-bold text-slate-600 border-b border-slate-100 pb-1 mb-2">
                     <span>${nombresDias[i]} ${cursor.getDate()}</span>
-                    ${hitosDia.length ? `<span class="text-amber-500" title="${hitosDia.map(h=>h.nombre+' ('+h.proyectoNombre+')').join(' · ')}">⭐</span>` : ''}
+                    ${hitosDia.length ? `<span title="${hitosDia.map(h=>(h.tipo==='preliminar'?'📋 ':'⭐ ')+h.nombre+' ('+h.proyectoNombre+')').join(' · ')}">${hitoIcono}</span>` : ''}
                 </div>
-                ${hitosDia.map(h => `<div class="rounded-lg p-1.5 mb-1.5 text-xs bg-amber-50 text-amber-700 border border-amber-200">⭐ <strong>${h.nombre}</strong><div class="text-[10px] opacity-80">${h.proyectoNombre} — hito completado</div></div>`).join('')}
-                ${evs.length ? evs.map(e => {
+                ${hitosDia.map(h => {
+                    const esPrelim = h.tipo === 'preliminar';
+                    return `<div class="rounded-lg p-1.5 mb-1.5 text-xs ${esPrelim?'bg-blue-50 text-blue-700 border border-blue-200':'bg-amber-50 text-amber-700 border border-amber-200'}">${esPrelim?'📋':'⭐'} <strong>${h.nombre}</strong><div class="text-[10px] opacity-80">${h.proyectoNombre} — ${esPrelim?'preliminar cerrada':'hito completado'}</div></div>`;
+                }).join('')}
+                ${evs.length ? evs.filter(e => !e.esPreliminar).map(e => {
                     const c = colorProyecto(e.proyectoId);
                     return `<div class="rounded-lg p-1.5 mb-1.5 text-xs" style="background:${c.bg};color:${c.txt}">
                         <div class="font-bold truncate">${e.tareaNombre}</div>
                         <div class="text-[10px] opacity-80 truncate">${e.proyectoNombre} · ${e.avancePct}%</div>
                     </div>`;
-                }).join('') : (!hitosDia.length ? `<div class="text-[11px] text-slate-300 italic">Sin tareas</div>` : '')}
+                }).join('') : ''}
+                ${!evs.filter(e=>!e.esPreliminar).length && !hitosDia.length ? `<div class="text-[11px] text-slate-300 italic">Sin tareas</div>` : ''}
             </div>`;
             cursor.setDate(cursor.getDate() + 1);
         }
