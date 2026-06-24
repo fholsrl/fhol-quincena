@@ -407,8 +407,8 @@ router.put('/proyectos/:id/sincronizar-tareas', proteger, async (req, res) => {
         const proyectoId = req.params.id;
         const proyecto = await Proyecto.findByPk(proyectoId);
         if (!proyecto) return res.status(404).json({ error: 'No encontrado' });
-        if (proyecto.estado !== 'BORRADOR')
-            return res.status(400).json({ error: 'Solo se pueden reemplazar las tareas de un proyecto en BORRADOR' });
+        if (!['BORRADOR', 'ACTIVO', 'PAUSADO'].includes(proyecto.estado))
+            return res.status(400).json({ error: 'Solo se puede editar un proyecto en BORRADOR, ACTIVO o PAUSADO' });
 
         const { nombre, cliente, responsable, notas, tareas } = req.body;
         if (nombre)      proyecto.nombre      = nombre;
@@ -417,32 +417,133 @@ router.put('/proyectos/:id/sincronizar-tareas', proteger, async (req, res) => {
         proyecto.notas       = notas       ?? proyecto.notas;
         await proyecto.save();
 
-        // Borrar tareas existentes (KitItems se borran en cascada por la FK)
-        await Tarea.destroy({ where: { proyectoId } });
+        if (proyecto.estado === 'BORRADOR') {
+            // BORRADOR: nada tiene avance real todavía — reemplazo total, simple y seguro.
+            await Tarea.destroy({ where: { proyectoId } });
+            if (tareas && tareas.length) {
+                for (let i = 0; i < tareas.length; i++) {
+                    const t = tareas[i];
+                    const fase = t.fase === 'PRELIMINAR' ? 'PRELIMINAR' : 'EJECUCION';
+                    const buf  = calcBuf(t.diasHabiles || 1, fase);
+                    const tarea = await Tarea.create({
+                        proyectoId, nombre: t.nombre, fase,
+                        tipo: fase === 'PRELIMINAR' ? 'NORMAL' : (t.tipo || 'NORMAL'),
+                        estado: t.tipo === 'ESPERA' ? 'ESPERA' : 'PENDIENTE',
+                        diasHabiles: t.diasHabiles || 1, bufferDias: buf,
+                        orden: i,
+                        diasManual: !!t.diasManual,
+                    });
+                    if (t.kit && t.kit.length) {
+                        for (const item of t.kit) {
+                            await KitItem.create({
+                                tareaId: tarea.id,
+                                descripcion: item.descripcion,
+                                diasHabiles: item.diasHabiles || 1,
+                                esRestriccion: !!item.esRestriccion,
+                                esSugerida: item.esSugerida || false,
+                            });
+                        }
+                    }
+                }
+            }
+        } else {
+            // ACTIVO/PAUSADO: hay tareas con avance real — no se puede reemplazar
+            // todo a ciegas. Se EMPAREJA por id: las que ya existían (vienen con
+            // su id real desde el formulario) se ACTUALIZAN respetando su fecha
+            // de inicio si ya arrancaron; las nuevas (sin id) se CREAN; las que
+            // existían pero ya no vienen en la lista se eliminan SOLO si nunca
+            // arrancaron (sin activadaEn) — una tarea iniciada nunca se borra.
+            const existentes = await Tarea.findAll({ where: { proyectoId } });
+            const idsRecibidos = (tareas || []).filter(t => t.id).map(t => t.id);
 
-        // Volver a crear todas según lo que llegó del formulario
-        if (tareas && tareas.length) {
-            for (let i = 0; i < tareas.length; i++) {
-                const t = tareas[i];
-                const fase = t.fase === 'PRELIMINAR' ? 'PRELIMINAR' : 'EJECUCION';
-                const buf  = calcBuf(t.diasHabiles || 1, fase);
-                const tarea = await Tarea.create({
-                    proyectoId, nombre: t.nombre, fase,
-                    tipo: fase === 'PRELIMINAR' ? 'NORMAL' : (t.tipo || 'NORMAL'),
-                    estado: t.tipo === 'ESPERA' ? 'ESPERA' : 'PENDIENTE',
-                    diasHabiles: t.diasHabiles || 1, bufferDias: buf,
-                    orden: i,
-                    diasManual: !!t.diasManual,
-                });
-                if (t.kit && t.kit.length) {
-                    for (const item of t.kit) {
-                        await KitItem.create({
-                            tareaId: tarea.id,
-                            descripcion: item.descripcion,
-                            diasHabiles: item.diasHabiles || 1,
-                            esRestriccion: !!item.esRestriccion,
-                            esSugerida: item.esSugerida || false,
+            // Eliminar las que ya no están en la lista y nunca arrancaron
+            for (const ex of existentes) {
+                if (!idsRecibidos.includes(ex.id) && !ex.activadaEn) {
+                    await KitItem.destroy({ where: { tareaId: ex.id } });
+                    await ex.destroy();
+                }
+            }
+
+            if (tareas && tareas.length) {
+                for (let i = 0; i < tareas.length; i++) {
+                    const t = tareas[i];
+                    const fase = t.fase === 'PRELIMINAR' ? 'PRELIMINAR' : 'EJECUCION';
+
+                    if (t.id) {
+                        // Tarea existente: actualizar sin tocar su progreso real
+                        const tarea = await Tarea.findByPk(t.id);
+                        if (!tarea) continue;
+                        const yaArranco = !!tarea.activadaEn;
+                        tarea.nombre = t.nombre;
+                        // Si ya arrancó, el mínimo de días es lo ya consumido —
+                        // se puede AUMENTAR la duración (y su buffer) pero no
+                        // reducirla por debajo de lo que ya se trabajó.
+                        const minDias = yaArranco ? Math.max(tarea.diasHabilesConsumidos || 0, 1) : 1;
+                        tarea.diasHabiles = Math.max(t.diasHabiles || 1, minDias);
+                        tarea.bufferDias  = calcBuf(tarea.diasHabiles, fase);
+                        tarea.tipo        = fase === 'PRELIMINAR' ? 'NORMAL' : (t.tipo || tarea.tipo);
+                        tarea.diasManual  = !!t.diasManual;
+                        tarea.orden       = i;
+                        await tarea.save();
+
+                        // Kit: igual lógica — emparejar por id, conservar completados.
+                        const kitExistente = await KitItem.findAll({ where: { tareaId: tarea.id } });
+                        const kitIdsRecibidos = (t.kit || []).filter(k => k.id).map(k => k.id);
+                        for (const ke of kitExistente) {
+                            if (!kitIdsRecibidos.includes(ke.id) && !ke.completado) await ke.destroy();
+                        }
+                        for (const k of (t.kit || [])) {
+                            if (k.id) {
+                                const item = await KitItem.findByPk(k.id);
+                                if (item && !item.completado) {
+                                    item.descripcion   = k.descripcion;
+                                    item.diasHabiles   = k.diasHabiles || 1;
+                                    item.esRestriccion = !!k.esRestriccion;
+                                    await item.save();
+                                }
+                            } else {
+                                await KitItem.create({
+                                    tareaId: tarea.id, descripcion: k.descripcion,
+                                    diasHabiles: k.diasHabiles || 1,
+                                    esRestriccion: !!k.esRestriccion,
+                                    esSugerida: k.esSugerida || false,
+                                });
+                            }
+                        }
+                    } else {
+                        // Tarea nueva: se crea y, si el proyecto ya no tiene
+                        // preliminares pendientes, se activa de inmediato.
+                        const buf = calcBuf(t.diasHabiles || 1, fase);
+                        const nueva = await Tarea.create({
+                            proyectoId, nombre: t.nombre, fase,
+                            tipo: fase === 'PRELIMINAR' ? 'NORMAL' : (t.tipo || 'NORMAL'),
+                            estado: t.tipo === 'ESPERA' ? 'ESPERA' : 'PENDIENTE',
+                            diasHabiles: t.diasHabiles || 1, bufferDias: buf,
+                            orden: i, diasManual: !!t.diasManual,
                         });
+                        if (t.kit && t.kit.length) {
+                            for (const k of t.kit) {
+                                await KitItem.create({
+                                    tareaId: nueva.id, descripcion: k.descripcion,
+                                    diasHabiles: k.diasHabiles || 1,
+                                    esRestriccion: !!k.esRestriccion,
+                                    esSugerida: k.esSugerida || false,
+                                });
+                            }
+                        }
+                        if (proyecto.estado === 'ACTIVO' && nueva.tipo !== 'ESPERA') {
+                            const hayPreliminaresPendientes = await Tarea.findOne({
+                                where: { proyectoId, fase: 'PRELIMINAR', estado: { [Op.ne]: 'COMPLETADA' } }
+                            });
+                            if (!hayPreliminaresPendientes) {
+                                nueva.activadaEn = new Date();
+                                nueva.estado     = await estadoSegunDependenciaDura(nueva);
+                                await nueva.save();
+                            } else if (fase !== 'PRELIMINAR') {
+                                nueva.estado = 'ESPERANDO_PRELIMINAR';
+                                await nueva.save();
+                            }
+                        }
                     }
                 }
             }

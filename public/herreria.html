@@ -483,6 +483,7 @@ function resetFormularioProyecto() {
     document.getElementById('np-titulo').textContent = '＋ Nuevo proyecto de herrería';
     document.getElementById('np-btn-activar').textContent  = '▶ Guardar y activar';
     document.getElementById('np-btn-borrador').textContent = '💾 Guardar borrador';
+    document.getElementById('np-btn-borrador').classList.remove('hidden');
     document.getElementById('np-btn-cancelar').classList.add('hidden');
     document.getElementById('np-nombre').value = '';
     document.getElementById('np-cliente').value = '';
@@ -505,11 +506,15 @@ function cancelarEdicionProyecto() {
 // Abre el formulario completo PRECARGADO con los datos de un proyecto en
 // BORRADOR — mismo entorno que al crearlo, para poder seguir editándolo sin
 // duplicar lógica en otro lado.
-function abrirEdicionBorrador(p) {
+function abrirEdicionProyecto(p) {
     editandoProyectoId = p.id;
-    document.getElementById('np-titulo').textContent = `✏️ Editando borrador — ${p.nombre}`;
-    document.getElementById('np-btn-activar').textContent  = '▶ Guardar y activar';
-    document.getElementById('np-btn-borrador').textContent = '💾 Guardar cambios';
+    const esBorrador = p.estado === 'BORRADOR';
+    document.getElementById('np-titulo').textContent = esBorrador
+        ? `✏️ Editando borrador — ${p.nombre}`
+        : `✏️ Editando proyecto activo — ${p.nombre}`;
+    document.getElementById('np-btn-activar').textContent  = esBorrador ? '▶ Guardar y activar' : '💾 Guardar cambios';
+    document.getElementById('np-btn-borrador').textContent = esBorrador ? '💾 Guardar borrador' : '';
+    document.getElementById('np-btn-borrador').classList.toggle('hidden', !esBorrador);
     document.getElementById('np-btn-cancelar').classList.remove('hidden');
 
     document.getElementById('np-nombre').value      = p.nombre || '';
@@ -526,11 +531,15 @@ function abrirEdicionBorrador(p) {
     if (todasLasTareas.length) {
         todasLasTareas.forEach(t => {
             agregarTareaForm({
+                id: t.id,
                 nombre: t.nombre,
                 fase: t.fase,
                 tipo: t.tipo,
                 diasHabiles: t.diasHabiles,
+                activadaEn: t.activadaEn,
+                diasHabilesConsumidos: t.diasHabilesConsumidos,
                 kit: (t.KitItems || []).map(k => ({
+                    id: k.id,
                     descripcion: k.descripcion,
                     diasHabiles: k.diasHabiles,
                     esRestriccion: k.esRestriccion,
@@ -544,6 +553,8 @@ function abrirEdicionBorrador(p) {
     recalcNpTotal();
     tab('nuevo');
 }
+// Alias por compatibilidad con el nombre anterior (proyectos en BORRADOR)
+function abrirEdicionBorrador(p) { abrirEdicionProyecto(p); }
 
 // ─── Carga de datos ───────────────────────────────────────────────────────────
 async function cargarProyectos() {
@@ -724,14 +735,17 @@ function renderDetalle() {
     const acc = document.getElementById('det-acciones');
     let html = '';
     if (esAdmin) {
-        // En BORRADOR, "Editar" vuelve al mismo formulario completo de carga
-        // (mismo entorno que al crear el proyecto). En otros estados, solo se
-        // editan datos generales con el modal chico — la estructura de tareas
-        // ya tiene avance/fechas reales y no se puede reemplazar sin perderlos.
-        if (p.estado === 'BORRADOR') {
-            html += `<button onclick="abrirEdicionBorrador(proyectoActual)" class="bg-violet-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-violet-700 transition">✏️ Editar</button>`;
-        } else {
+        // En BORRADOR, ACTIVO y PAUSADO, "Editar" vuelve al mismo formulario
+        // completo de carga (mismo entorno que al crear el proyecto) — un único
+        // formato de edición para todo, evitando dos lugares distintos que
+        // puedan desincronizarse. Las tareas ya iniciadas o completadas se
+        // muestran bloqueadas (solo se puede aumentar días, nunca reducir ni
+        // borrar). Solo en TERMINADO se usa el modal chico, porque ahí ya no
+        // tiene sentido tocar la estructura de tareas en absoluto.
+        if (p.estado === 'TERMINADO') {
             html += `<button onclick="abrirModalProyecto()" class="bg-violet-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-violet-700 transition">✏️ Editar proyecto</button>`;
+        } else {
+            html += `<button onclick="abrirEdicionProyecto(proyectoActual)" class="bg-violet-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-violet-700 transition">✏️ Editar</button>`;
         }
         if (p.estado === 'BORRADOR' || p.estado === 'PAUSADO')
             html += `<button onclick="accionProyecto('activar')" class="bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-green-700 transition">▶ Activar</button>`;
@@ -1205,8 +1219,11 @@ function agregarTareaForm(datos = {}) {
     const tipo = datos.tipo || 'NORMAL';
     const dias = datos.diasHabiles || 1;
     const kit  = (datos.kit || []).map(k => ({ ...k })); // copia, no referencia directa
+    const idReal = datos.id || null; // id real en la base, si esta tarea ya existía
+    const yaArranco = !!datos.activadaEn;
+    const minDias = yaArranco ? Math.max(datos.diasHabilesConsumidos || 0, 1) : 1;
     if (!npTareas.find(t => t.id === id)) {
-        npTareas.push({ id, nombre: datos.nombre || '', fase, tipo, diasHabiles: dias, kit });
+        npTareas.push({ id, idReal, nombre: datos.nombre || '', fase, tipo, diasHabiles: dias, kit, yaArranco, minDias });
     }
     const cont = document.getElementById('np-tareas');
     const div  = document.createElement('div');
@@ -1216,18 +1233,22 @@ function agregarTareaForm(datos = {}) {
     const buf = esPrelim ? 0 : Math.ceil(dias * 0.30);
     const bufTexto = esPrelim ? 'Sin buffer (preliminar)' : `Buffer: ${buf}d`;
     const horTexto  = esPrelim ? `Solo ${dias}d estimados` : `Horizonte: ${dias+buf}d`;
+    const avisoIniciada = yaArranco
+        ? `<div class="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-1">🔒 Ya está en curso o completada — solo se puede AUMENTAR los días (mínimo ${minDias}d), no reducirlos. La fecha de inicio no cambia.</div>`
+        : '';
 
     div.innerHTML = `
         <div class="flex items-center gap-2">
             <span class="text-xs font-bold text-slate-400 w-5">${npIdx}</span>
             <input type="text" value="${datos.nombre || ''}" placeholder="Nombre de la tarea" class="flex-1 border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:border-violet-400 uppercase"
                 oninput="npSetTarea('${id}','nombre',this.value.toUpperCase())">
-            <button onclick="eliminarTareaForm('${id}')" class="text-slate-300 hover:text-red-500 text-lg leading-none">✕</button>
+            ${yaArranco ? '' : `<button onclick="eliminarTareaForm('${id}')" class="text-slate-300 hover:text-red-500 text-lg leading-none">✕</button>`}
         </div>
+        ${avisoIniciada}
         <div class="flex flex-wrap gap-2 items-center">
             <span class="text-xs text-slate-400 font-bold">Fase:</span>
-            <button onclick="npSelFase('${id}','PRELIMINAR',this)" class="tipo-opt ${esPrelim?'sel-NORMAL':''}">📝 Preliminar</button>
-            <button onclick="npSelFase('${id}','EJECUCION',this)" class="tipo-opt ${esPrelim?'':'sel-NORMAL'}">🔧 Ejecución</button>
+            <button onclick="npSelFase('${id}','PRELIMINAR',this)" class="tipo-opt ${esPrelim?'sel-NORMAL':''}" ${yaArranco?'disabled':''}>📝 Preliminar</button>
+            <button onclick="npSelFase('${id}','EJECUCION',this)" class="tipo-opt ${esPrelim?'':'sel-NORMAL'}" ${yaArranco?'disabled':''}>🔧 Ejecución</button>
             <span class="text-xs text-slate-400 italic ml-1" id="npfaseinfo-${id}">${esPrelim ? 'Preliminar: sin buffer, solo registra fecha de cierre' : 'Ejecución usa buffer TOC del 30%'}</span>
         </div>
         <div class="flex flex-wrap gap-2 items-center" id="nptipowrap-${id}" style="${esPrelim?'display:none;':''}">
@@ -1238,7 +1259,7 @@ function agregarTareaForm(datos = {}) {
         </div>
         <div class="flex items-center gap-3">
             <span class="text-xs text-slate-400 font-bold">Días hábiles:</span>
-            <input type="number" min="1" value="${dias}" class="w-20 border border-slate-200 rounded-lg p-2 text-sm text-center focus:outline-none focus:border-violet-400"
+            <input type="number" min="${minDias}" value="${dias}" class="w-20 border border-slate-200 rounded-lg p-2 text-sm text-center focus:outline-none focus:border-violet-400"
                 oninput="npSetDias('${id}',this.value)">
             <span class="text-xs text-violet-600 font-bold" id="npbuf-${id}">${bufTexto}</span>
             <span class="text-xs text-slate-400" id="nphor-${id}">${horTexto}</span>
@@ -1303,8 +1324,12 @@ function npSelFase(id, fase, btn) {
 }
 
 function npSetDias(id, val) {
-    const dias = parseInt(val) || 1;
     const t = npTareas.find(t => t.id === id);
+    let dias = parseInt(val) || 1;
+    if (t?.yaArranco && dias < t.minDias) {
+        dias = t.minDias;
+        document.querySelector(`#${id} input[type=number]`).value = dias;
+    }
     const esPreliminar = t?.fase === 'PRELIMINAR';
     const buf = esPreliminar ? 0 : Math.ceil(dias * 0.30);
     npSetTarea(id, 'diasHabiles', dias);
@@ -1336,6 +1361,8 @@ function npKitSugerido(tareaId, desc) {
 }
 
 function eliminarTareaForm(id) {
+    const t = npTareas.find(t => t.id === id);
+    if (t?.yaArranco) { alert('Esta tarea ya está en curso o completada — no se puede eliminar.'); return; }
     npTareas = npTareas.filter(t => t.id !== id);
     const el = document.getElementById(id);
     if (el) el.remove();
@@ -1374,6 +1401,7 @@ async function guardarProyecto(estado) {
             });
         }
         tareasDOM.push({
+            id:          npT.idReal || undefined, // si existe, el backend la actualiza en vez de crearla
             nombre:      (nombreInp?.value || '').trim().toUpperCase() || `Tarea ${tareasDOM.length+1}`,
             fase, tipo,
             diasHabiles: parseInt(diasInp?.value) || 1,
@@ -1390,8 +1418,11 @@ async function guardarProyecto(estado) {
     };
 
     let proyectoId;
+    let yaEstabaActivo = false;
     if (editandoProyectoId) {
-        // Modo edición: reemplaza todas las tareas del borrador existente
+        // Modo edición: actualiza o crea tareas según corresponda (ver backend)
+        const pAntes = proyectos.find(p => p.id === editandoProyectoId);
+        yaEstabaActivo = pAntes && (pAntes.estado === 'ACTIVO' || pAntes.estado === 'PAUSADO');
         await fetch(`/herreria/proyectos/${editandoProyectoId}/sincronizar-tareas`, {
             method:'PUT', headers:{'Content-Type':'application/json'},
             body: JSON.stringify(body)
@@ -1407,7 +1438,10 @@ async function guardarProyecto(estado) {
         proyectoId = nuevo.id;
     }
 
-    if (estado === 'ACTIVO') {
+    // Solo llamar a /activar si el proyecto todavía no estaba activo —
+    // si ya estaba ACTIVO/PAUSADO, sincronizar-tareas ya maneja la activación
+    // de tareas nuevas y no hace falta (ni conviene) re-disparar todo el proceso.
+    if (estado === 'ACTIVO' && !yaEstabaActivo) {
         await fetch(`/herreria/proyectos/${proyectoId}/activar`, { method:'POST' });
     }
 
@@ -1761,32 +1795,49 @@ function renderCalendario() {
         inicioGrid.setDate(inicioGrid.getDate() - offset);
 
         const hoy = fmtYMD(new Date());
+
+        // Generar los 42 días de la grilla (6 semanas)
+        const dias = [];
+        let cursor = new Date(inicioGrid);
+        for (let i = 0; i < 42; i++) { dias.push(new Date(cursor)); cursor.setDate(cursor.getDate() + 1); }
+
+        // Filtrar proyectos que tienen alguna superposición con el rango visible
+        const rangoInicio = fmtYMD(dias[0]);
+        const rangoFin    = fmtYMD(dias[41]);
+        const proyectosVisibles = calProyectosLinea.filter(p => p.inicio <= rangoFin && p.fin >= rangoInicio);
+
         let html = `<div class="grid grid-cols-7 gap-1 text-xs">`;
         ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].forEach(d => {
             html += `<div class="text-center font-bold text-slate-400 py-1">${d}</div>`;
         });
-        let cursor = new Date(inicioGrid);
-        for (let i = 0; i < 42; i++) {
-            const esDelMes = cursor.getMonth() === calFechaRef.getMonth();
-            const esHoy = fmtYMD(cursor) === hoy;
-            const evs = eventosEnDia(cursor);
-            const hitosDia = hitosEnDia(cursor);
+
+        dias.forEach(dia => {
+            const ymd = fmtYMD(dia);
+            const esDelMes = dia.getMonth() === calFechaRef.getMonth();
+            const esHoy = ymd === hoy;
+            const hitosDia = hitosEnDia(dia);
             const hitoIcono = hitosDia.some(h => h.tipo !== 'preliminar') ? '⭐' : '📋';
             const hitosTitle = hitosDia.map(h => `${h.tipo==='preliminar'?'📋':'⭐'} ${h.nombre} (${h.proyectoNombre})`).join(' · ');
-            html += `<div class="rounded-lg p-1 min-h-[64px] relative ${esDelMes?'bg-slate-50':'bg-slate-50/40 opacity-40'} ${esHoy?'ring-2 ring-violet-400':''}">
+
+            // Proyectos cuya línea pasa por este día específico — una franja
+            // delgada de color por proyecto, no texto. Esto es lo que se ve
+            // "moviéndose" día a día a lo largo del mes.
+            const proyectosDelDia = proyectosVisibles.filter(p => ymd >= p.inicio && ymd <= p.fin);
+
+            html += `<div class="rounded-lg p-1 min-h-[58px] relative ${esDelMes?'bg-slate-50':'bg-slate-50/40 opacity-40'} ${esHoy?'ring-2 ring-violet-400':''}">
                 <div class="flex justify-between items-start">
-                    <div class="font-bold text-slate-600">${cursor.getDate()}</div>
+                    <div class="font-bold text-slate-600">${dia.getDate()}</div>
                     ${hitosDia.length ? `<span class="text-xs" title="${hitosTitle}">${hitoIcono}</span>` : ''}
                 </div>
-                ${evs.slice(0,3).map(e => {
-                    const c = colorProyecto(e.proyectoId);
-                    const prefijo = e.esPreliminar ? '📋 ' : '';
-                    return `<div class="text-[10px] rounded px-1 mb-0.5 truncate" style="background:${c.bg};color:${c.txt}" title="${e.proyectoNombre} — ${e.tareaNombre}">${prefijo}${e.proyectoNombre}</div>`;
-                }).join('')}
-                ${evs.length > 3 ? `<div class="text-[10px] text-slate-400">+${evs.length-3} más</div>` : ''}
+                <div class="space-y-0.5 mt-1">
+                    ${proyectosDelDia.slice(0,3).map(p => {
+                        const c = COLORES_PROYECTO[p.colorIdx % COLORES_PROYECTO.length];
+                        return `<div class="h-1.5 rounded-full cursor-pointer" style="background:${c.txt}" title="${p.proyectoNombre}" onclick="abrirDetalle(${p.proyectoId})"></div>`;
+                    }).join('')}
+                    ${proyectosDelDia.length > 3 ? `<div class="text-[9px] text-slate-400">+${proyectosDelDia.length-3} más</div>` : ''}
+                </div>
             </div>`;
-            cursor.setDate(cursor.getDate() + 1);
-        }
+        });
         html += `</div>`;
         document.getElementById('cal-mes-grid').innerHTML = html;
     } else {
@@ -1800,15 +1851,23 @@ function renderCalendario() {
 
         let html = `<div class="grid grid-cols-6 gap-2">`;
         const nombresDias = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
-        let cursor = new Date(lunes);
+        let cursor2 = new Date(lunes);
         for (let i = 0; i < 6; i++) {
-            const evs = eventosEnDia(cursor);
-            const hitosDia = hitosEnDia(cursor);
+            const evs = eventosEnDia(cursor2);
+            const hitosDia = hitosEnDia(cursor2);
             const hitoIcono = hitosDia.some(h => h.tipo !== 'preliminar') ? '⭐' : '📋';
+            const ymd = fmtYMD(cursor2);
+            const proyectosDelDia = calProyectosLinea.filter(p => ymd >= p.inicio && ymd <= p.fin);
             html += `<div class="border border-slate-200 rounded-xl p-2 min-h-[140px]">
                 <div class="flex justify-between items-center text-xs font-bold text-slate-600 border-b border-slate-100 pb-1 mb-2">
-                    <span>${nombresDias[i]} ${cursor.getDate()}</span>
+                    <span>${nombresDias[i]} ${cursor2.getDate()}</span>
                     ${hitosDia.length ? `<span title="${hitosDia.map(h=>(h.tipo==='preliminar'?'📋 ':'⭐ ')+h.nombre+' ('+h.proyectoNombre+')').join(' · ')}">${hitoIcono}</span>` : ''}
+                </div>
+                <div class="flex gap-1 mb-2">
+                    ${proyectosDelDia.map(p => {
+                        const c = COLORES_PROYECTO[p.colorIdx % COLORES_PROYECTO.length];
+                        return `<div class="h-1.5 flex-1 rounded-full cursor-pointer" style="background:${c.txt}" title="${p.proyectoNombre}" onclick="abrirDetalle(${p.proyectoId})"></div>`;
+                    }).join('')}
                 </div>
                 ${hitosDia.map(h => {
                     const esPrelim = h.tipo === 'preliminar';
@@ -1816,25 +1875,25 @@ function renderCalendario() {
                 }).join('')}
                 ${evs.length ? evs.filter(e => !e.esPreliminar).map(e => {
                     const c = colorProyecto(e.proyectoId);
-                    return `<div class="rounded-lg p-1.5 mb-1.5 text-xs" style="background:${c.bg};color:${c.txt}">
+                    return `<div class="rounded-lg p-1.5 mb-1.5 text-xs cursor-pointer" style="background:${c.bg};color:${c.txt}" onclick="abrirDetalle(${e.proyectoId})">
                         <div class="font-bold truncate">${e.tareaNombre}</div>
                         <div class="text-[10px] opacity-80 truncate">${e.proyectoNombre} · ${e.avancePct}%</div>
                     </div>`;
                 }).join('') : ''}
-                ${!evs.filter(e=>!e.esPreliminar).length && !hitosDia.length ? `<div class="text-[11px] text-slate-300 italic">Sin tareas</div>` : ''}
+                ${!evs.filter(e=>!e.esPreliminar).length && !hitosDia.length && !proyectosDelDia.length ? `<div class="text-[11px] text-slate-300 italic">Sin tareas</div>` : ''}
             </div>`;
-            cursor.setDate(cursor.getDate() + 1);
+            cursor2.setDate(cursor2.getDate() + 1);
         }
         html += `</div>`;
         document.getElementById('cal-semana-grid').innerHTML = html;
     }
 
     // Leyenda de proyectos con color
-    const ids = [...new Set(calEventos.map(e => e.proyectoId))];
+    const ids = [...new Set(calProyectosLinea.map(p => p.proyectoId))];
     const leyenda = ids.map(id => {
-        const c = colorProyecto(id);
-        const nombre = calEventos.find(e => e.proyectoId === id)?.proyectoNombre || '';
-        return `<span class="text-xs flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${c.txt}"></span>${nombre}</span>`;
+        const p = calProyectosLinea.find(x => x.proyectoId === id);
+        const c = COLORES_PROYECTO[p.colorIdx % COLORES_PROYECTO.length];
+        return `<span class="text-xs flex items-center gap-1.5 cursor-pointer" onclick="abrirDetalle(${id})"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${c.txt}"></span>${p.proyectoNombre}</span>`;
     }).join('');
     document.getElementById('cal-leyenda').innerHTML = leyenda || '<span class="text-xs text-slate-400 italic">Sin proyectos con tareas activadas</span>';
 }
