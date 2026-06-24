@@ -290,6 +290,24 @@
     </div>
 </div>
 
+<!-- MODAL RESUMEN DE PUNTO (click en calendario o hito) -->
+<div id="modal-resumen-punto" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onclick="if(event.target===this) cerrarResumenPunto()">
+    <div class="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
+        <div class="flex justify-between items-start gap-2 mb-3">
+            <div>
+                <div class="text-xs text-slate-400 font-bold uppercase" id="rp-fecha">—</div>
+                <div class="font-black text-slate-800" id="rp-proyecto">—</div>
+            </div>
+            <button onclick="cerrarResumenPunto()" class="text-slate-400 hover:text-slate-700 text-xl leading-none">✕</button>
+        </div>
+        <div id="rp-hito-wrap" class="hidden mb-3 p-2 rounded-lg bg-amber-50 border border-amber-200">
+            <div class="text-xs font-bold text-amber-800" id="rp-hito-texto">—</div>
+        </div>
+        <div class="text-xs text-slate-500" id="rp-contexto">—</div>
+        <button onclick="cerrarResumenPunto(); abrirDetalle(rpProyectoIdActual);" class="w-full mt-4 bg-violet-600 text-white text-xs font-bold py-2 rounded-xl hover:bg-violet-700 transition">Ver proyecto completo →</button>
+    </div>
+</div>
+
 <!-- MODAL EDITAR ÍTEM DE KIT -->
 <div id="modal-kit-item" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
     <div class="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
@@ -1717,7 +1735,8 @@ function renderLineaGeneral() {
             const hPct = pct(h.fecha);
             const icono = h.tipo === 'preliminar' ? '📋' : '⭐';
             const etiqueta = h.tipo === 'preliminar' ? 'Preliminar cerrada' : 'Hito completado';
-            return `<div class="absolute -top-1 ${h.tipo === 'preliminar' ? 'text-blue-500' : 'text-amber-500'} cursor-default" style="left:${hPct}%;transform:translateX(-50%);" title="${icono} ${etiqueta}: ${h.nombre} — ${fmtDiaCorto(h.fecha)}">${icono}</div>`;
+            const hitoData = JSON.stringify(h).replace(/"/g,'&quot;');
+            return `<div class="absolute -top-1 ${h.tipo === 'preliminar' ? 'text-blue-500' : 'text-amber-500'} cursor-pointer" style="left:${hPct}%;transform:translateX(-50%);" title="${icono} ${etiqueta}: ${h.nombre} — ${fmtDiaCorto(h.fecha)}" onclick="event.stopPropagation(); mostrarResumenPunto(${p.proyectoId}, '${h.fecha}', ${hitoData})">${icono}</div>`;
         }).join('');
 
         return `<div class="cursor-pointer" onclick="abrirDetalle(${p.proyectoId})">
@@ -1726,7 +1745,7 @@ function renderLineaGeneral() {
                 <span class="text-slate-400">${fmtDiaCorto(p.inicio)} → ${p.estado==='TERMINADO'?fmtDiaCorto(p.fin):'hoy'} · ${estadoTxt}</span>
             </div>
             <div class="relative h-3 bg-slate-100 rounded-full">
-                <div class="absolute h-3 rounded-full" style="left:${inicioPct}%;width:${anchoPct}%;background:${color.txt};opacity:.85;"></div>
+                <div class="absolute h-3 rounded-full cursor-pointer" style="left:${inicioPct}%;width:${anchoPct}%;background:${color.txt};opacity:.85;" onclick="event.stopPropagation(); mostrarResumenPunto(${p.proyectoId}, '${fmtYMD(hoy)}', null)"></div>
                 ${hitosHtml}
             </div>
         </div>`;
@@ -1759,6 +1778,44 @@ function calNav(dir) {
 function fmtYMD(d) {
     const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
     return `${y}-${m}-${dd}`;
+}
+
+// ─── Resumen al hacer click en un punto del calendario o un hito ─────────────
+let rpProyectoIdActual = null;
+
+function mostrarResumenPunto(proyectoId, fechaYmd, hito) {
+    rpProyectoIdActual = proyectoId;
+    const p = calProyectosLinea.find(x => x.proyectoId === proyectoId);
+    const [y,m,d] = fechaYmd.split('-');
+    document.getElementById('rp-fecha').textContent = `${d}/${m}/${y}`;
+    document.getElementById('rp-proyecto').textContent = p ? p.proyectoNombre : 'Proyecto';
+
+    const hitoWrap = document.getElementById('rp-hito-wrap');
+    if (hito) {
+        const icono = hito.tipo === 'preliminar' ? '📋' : '⭐';
+        const etiqueta = hito.tipo === 'preliminar' ? 'Preliminar cerrada' : 'Hito completado';
+        document.getElementById('rp-hito-texto').textContent = `${icono} ${etiqueta}: ${hito.nombre}`;
+        hitoWrap.classList.remove('hidden');
+    } else {
+        hitoWrap.classList.add('hidden');
+    }
+
+    // Contexto mínimo: cuántas tareas de este proyecto estaban en curso ese día
+    const enCurso = calEventos.filter(e => e.proyectoId === proyectoId && !e.esPreliminar && fechaYmd >= e.inicio && fechaYmd <= e.fin);
+    const contexto = document.getElementById('rp-contexto');
+    if (enCurso.length === 0) {
+        contexto.textContent = hito ? '' : 'Sin tareas de ejecución en curso ese día.';
+    } else if (enCurso.length === 1) {
+        contexto.textContent = `Tarea en curso ese día: ${enCurso[0].tareaNombre}.`;
+    } else {
+        contexto.textContent = `${enCurso.length} tareas en curso ese día: ${enCurso.map(e=>e.tareaNombre).join(', ')}.`;
+    }
+
+    document.getElementById('modal-resumen-punto').classList.remove('hidden');
+}
+
+function cerrarResumenPunto() {
+    document.getElementById('modal-resumen-punto').classList.add('hidden');
 }
 
 function colorProyecto(proyectoId) {
@@ -1815,24 +1872,27 @@ function renderCalendario() {
             const ymd = fmtYMD(dia);
             const esDelMes = dia.getMonth() === calFechaRef.getMonth();
             const esHoy = ymd === hoy;
-            const hitosDia = hitosEnDia(dia);
-            const hitoIcono = hitosDia.some(h => h.tipo !== 'preliminar') ? '⭐' : '📋';
-            const hitosTitle = hitosDia.map(h => `${h.tipo==='preliminar'?'📋':'⭐'} ${h.nombre} (${h.proyectoNombre})`).join(' · ');
 
-            // Proyectos cuya línea pasa por este día específico — una franja
-            // delgada de color por proyecto, no texto. Esto es lo que se ve
-            // "moviéndose" día a día a lo largo del mes.
+            // Proyectos cuya línea pasa por este día específico — franja sólida
+            // con el nombre superpuesto, no solo color, para identificar de un
+            // vistazo qué proyecto es sin tener que recordar cada color.
             const proyectosDelDia = proyectosVisibles.filter(p => ymd >= p.inicio && ymd <= p.fin);
 
-            html += `<div class="rounded-lg p-1 min-h-[58px] relative ${esDelMes?'bg-slate-50':'bg-slate-50/40 opacity-40'} ${esHoy?'ring-2 ring-violet-400':''}">
-                <div class="flex justify-between items-start">
-                    <div class="font-bold text-slate-600">${dia.getDate()}</div>
-                    ${hitosDia.length ? `<span class="text-xs" title="${hitosTitle}">${hitoIcono}</span>` : ''}
-                </div>
-                <div class="space-y-0.5 mt-1">
+            html += `<div class="rounded-lg p-1 min-h-[64px] relative ${esDelMes?'bg-slate-50':'bg-slate-50/40 opacity-40'} ${esHoy?'ring-2 ring-violet-400':''}">
+                <div class="font-bold text-slate-600">${dia.getDate()}</div>
+                <div class="space-y-1 mt-1">
                     ${proyectosDelDia.slice(0,3).map(p => {
                         const c = COLORES_PROYECTO[p.colorIdx % COLORES_PROYECTO.length];
-                        return `<div class="h-1.5 rounded-full cursor-pointer" style="background:${c.txt}" title="${p.proyectoNombre}" onclick="abrirDetalle(${p.proyectoId})"></div>`;
+                        const hitosDeEstePDia = (p.hitos || []).filter(h => h.fecha === ymd);
+                        const tieneHito = hitosDeEstePDia.length > 0;
+                        const nombreCorto = p.proyectoNombre.length > 14 ? p.proyectoNombre.slice(0,13)+'…' : p.proyectoNombre;
+                        const onclickAttr = tieneHito
+                            ? `mostrarResumenPunto(${p.proyectoId}, '${ymd}', ${JSON.stringify(hitosDeEstePDia[0]).replace(/"/g,'&quot;')})`
+                            : `mostrarResumenPunto(${p.proyectoId}, '${ymd}', null)`;
+                        return `<div class="rounded px-1 py-0.5 text-[10px] font-bold text-white truncate cursor-pointer flex items-center gap-1"
+                            style="background:${c.txt}" title="${p.proyectoNombre}" onclick="${onclickAttr}">
+                            ${tieneHito ? (hitosDeEstePDia[0].tipo==='preliminar'?'📋':'⭐') : ''}${nombreCorto}
+                        </div>`;
                     }).join('')}
                     ${proyectosDelDia.length > 3 ? `<div class="text-[9px] text-slate-400">+${proyectosDelDia.length-3} más</div>` : ''}
                 </div>
@@ -1903,7 +1963,7 @@ function descargarCalendarioExcel() {
 }
 
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { cerrarModalTarea(); cerrarModalProyecto(); cerrarModalKitItem(); cerrarModalNuevaTarea(); }
+    if (e.key === 'Escape') { cerrarModalTarea(); cerrarModalProyecto(); cerrarModalKitItem(); cerrarModalNuevaTarea(); cerrarResumenPunto(); }
 });
 </script>
 </body>
